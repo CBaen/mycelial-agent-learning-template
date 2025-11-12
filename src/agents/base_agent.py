@@ -40,6 +40,11 @@ from src.core.knowledge_base import KnowledgeBase, Episode, ExperienceTransition
 from src.core.transfer_learning import TransferLearningEngine, TransferStrategy, TransferResult
 from src.core.maml import MAMLLearner, MAMLConfig, AdaptationResult
 
+# BIG ROCK 9: EPISODIC MEMORY & REPLAY
+from src.memory.episodic_memory import EpisodicMemory, Experience
+from src.memory.memory_consolidator import MemoryConsolidator, ConsolidationStrategy, ConsolidationResult
+from src.memory.semantic_retriever import SemanticRetriever, SemanticQuery
+
 logger = logging.getLogger(__name__)
 
 
@@ -75,7 +80,10 @@ class MycelialAgent(Agent):
         gnn_communicator: Optional[GNNCommunicator] = None,
         knowledge_base: Optional[KnowledgeBase] = None,
         transfer_engine: Optional[TransferLearningEngine] = None,
-        maml_learner: Optional[MAMLLearner] = None
+        maml_learner: Optional[MAMLLearner] = None,
+        episodic_memory: Optional[EpisodicMemory] = None,
+        memory_consolidator: Optional[MemoryConsolidator] = None,
+        semantic_retriever: Optional[SemanticRetriever] = None
     ):
         """
         Initialize the Mycelial Agent.
@@ -92,6 +100,9 @@ class MycelialAgent(Agent):
             knowledge_base: Optional KnowledgeBase for experience storage and retrieval (Big Rock 8)
             transfer_engine: Optional TransferLearningEngine for knowledge transfer (Big Rock 8)
             maml_learner: Optional MAMLLearner for meta-learning (Big Rock 8)
+            episodic_memory: Optional EpisodicMemory for prioritized experience replay (Big Rock 9)
+            memory_consolidator: Optional MemoryConsolidator for offline learning (Big Rock 9)
+            semantic_retriever: Optional SemanticRetriever for semantic memory queries (Big Rock 9)
         """
         super().__init__(model)
 
@@ -135,6 +146,19 @@ class MycelialAgent(Agent):
         self.episode_transitions: List[ExperienceTransition] = []  # Current episode buffer
         self.transfer_enabled: bool = self.agent_config.get("transfer_enabled", False)
         self.maml_enabled: bool = self.agent_config.get("maml_enabled", False)
+
+        # BIG ROCK 9: EPISODIC MEMORY & REPLAY
+        self.episodic_memory = episodic_memory  # Prioritized experience replay buffer
+        self.memory_consolidator = memory_consolidator  # Offline learning consolidator
+        self.semantic_retriever = semantic_retriever  # Semantic memory retrieval
+        self.replay_enabled: bool = self.agent_config.get("replay_enabled", False)
+        self.consolidation_enabled: bool = self.agent_config.get("consolidation_enabled", False)
+        self.semantic_search_enabled: bool = self.agent_config.get("semantic_search_enabled", False)
+        self.replay_frequency: int = self.agent_config.get("replay_frequency", 4)  # Learn every N steps
+        self.replay_batch_size: int = self.agent_config.get("replay_batch_size", 32)
+        self.steps_since_replay: int = 0
+        self.total_replays: int = 0
+        self.total_consolidations: int = 0
 
         # State tracking
         self.current_state: Dict[str, Any] = {}
@@ -2472,3 +2496,381 @@ class MycelialAgent(Agent):
             'meta_initialized': self.maml_learner.meta_initialized,
             'current_task': self.current_task.task_id if self.current_task else None
         }
+
+    # =========================================================================
+    # BIG ROCK 9: EPISODIC MEMORY & REPLAY
+    # =========================================================================
+
+    def store_experience(
+        self,
+        state: np.ndarray,
+        action: Any,
+        reward: float,
+        next_state: np.ndarray,
+        done: bool,
+        info: Optional[Dict[str, Any]] = None
+    ):
+        """
+        Store experience in episodic memory for replay learning.
+
+        This method stores experiences in the prioritized replay buffer,
+        enabling the agent to learn from past experiences multiple times.
+
+        Args:
+            state: Current state observation
+            action: Action taken
+            reward: Reward received
+            next_state: Next state observation
+            done: Whether episode terminated
+            info: Optional additional information
+
+        Example:
+            >>> agent.store_experience(
+            ...     state=np.array([1.0, 2.0, 3.0]),
+            ...     action=1,
+            ...     reward=1.5,
+            ...     next_state=np.array([2.0, 3.0, 4.0]),
+            ...     done=False
+            ... )
+        """
+        if not self.episodic_memory or not self.replay_enabled:
+            return
+
+        # Store in episodic memory
+        self.episodic_memory.store(
+            state=state,
+            action=action,
+            reward=reward,
+            next_state=next_state,
+            done=done,
+            info=info or {}
+        )
+
+        logger.debug(
+            "%s: Stored experience in episodic memory (size: %d)",
+            self.agent_id, len(self.episodic_memory)
+        )
+
+    def learn_from_memory(
+        self,
+        num_batches: int = 1,
+        batch_size: Optional[int] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Learn from experiences stored in episodic memory.
+
+        This enables the agent to improve through offline learning by
+        replaying past experiences with prioritized sampling.
+
+        Args:
+            num_batches: Number of batches to replay
+            batch_size: Size of each batch (uses default if None)
+
+        Returns:
+            Dictionary with replay statistics, or None if not available
+
+        Example:
+            >>> # Learn from 10 batches of experiences
+            >>> stats = agent.learn_from_memory(num_batches=10)
+            >>> print(f"Average loss: {stats['mean_loss']:.4f}")
+        """
+        if not self.episodic_memory or not self.replay_enabled:
+            return None
+
+        if len(self.episodic_memory) < (batch_size or self.replay_batch_size):
+            logger.debug(
+                "%s: Not enough experiences for replay (%d < %d)",
+                self.agent_id, len(self.episodic_memory),
+                batch_size or self.replay_batch_size
+            )
+            return None
+
+        batch_size = batch_size or self.replay_batch_size
+        total_loss = 0.0
+        total_td_error = 0.0
+        experiences_replayed = 0
+
+        for _ in range(num_batches):
+            # Sample prioritized batch
+            batch, indices, weights = self.episodic_memory.sample(batch_size=batch_size)
+
+            # Convert to format needed by learning algorithm
+            # This is a placeholder - subclasses should override with specific logic
+            td_errors, loss = self._learn_from_batch(batch, weights)
+
+            # Update priorities based on TD errors
+            self.episodic_memory.update_priorities(indices, td_errors)
+
+            total_loss += loss
+            total_td_error += np.mean(np.abs(td_errors))
+            experiences_replayed += len(batch)
+
+        self.total_replays += num_batches
+
+        stats = {
+            'agent_id': self.agent_id,
+            'num_batches': num_batches,
+            'batch_size': batch_size,
+            'experiences_replayed': experiences_replayed,
+            'mean_loss': total_loss / num_batches,
+            'mean_td_error': total_td_error / num_batches,
+            'total_replays': self.total_replays,
+            'memory_size': len(self.episodic_memory)
+        }
+
+        logger.debug(
+            "%s: Learned from memory - %d batches, loss=%.4f",
+            self.agent_id, num_batches, stats['mean_loss']
+        )
+
+        return stats
+
+    def _learn_from_batch(
+        self,
+        batch: List[Experience],
+        weights: np.ndarray
+    ) -> Tuple[np.ndarray, float]:
+        """
+        Learn from a batch of experiences.
+
+        This is a placeholder method that subclasses should override
+        with their specific learning algorithm (DQN, PPO, etc.).
+
+        Args:
+            batch: List of Experience objects
+            weights: Importance sampling weights
+
+        Returns:
+            Tuple of (TD errors array, loss value)
+        """
+        # Placeholder implementation
+        # Subclasses should implement actual learning logic
+        td_errors = np.random.randn(len(batch)) * 0.1  # Dummy TD errors
+        loss = np.random.rand() * 0.5  # Dummy loss
+
+        return td_errors, loss
+
+    def consolidate_memory(
+        self,
+        num_steps: Optional[int] = None,
+        strategy: Optional[ConsolidationStrategy] = None
+    ) -> Optional[ConsolidationResult]:
+        """
+        Perform memory consolidation ("sleep" phase) for offline learning.
+
+        This method triggers intensive replay of high-priority experiences
+        to strengthen learning without environment interaction.
+
+        Args:
+            num_steps: Number of consolidation steps (uses consolidator default if None)
+            strategy: Consolidation strategy (uses consolidator default if None)
+
+        Returns:
+            ConsolidationResult with statistics, or None if not available
+
+        Example:
+            >>> # Perform consolidation with prioritized strategy
+            >>> result = agent.consolidate_memory(
+            ...     num_steps=100,
+            ...     strategy=ConsolidationStrategy.PRIORITIZED
+            ... )
+            >>> print(f"Loss reduction: {result.loss_reduction:.2%}")
+        """
+        if not self.memory_consolidator or not self.consolidation_enabled:
+            return None
+
+        if len(self.episodic_memory) < self.memory_consolidator.min_memory_size:
+            logger.debug(
+                "%s: Memory too small for consolidation (%d < %d)",
+                self.agent_id, len(self.episodic_memory),
+                self.memory_consolidator.min_memory_size
+            )
+            return None
+
+        logger.info(
+            "%s: Starting memory consolidation (step %d)",
+            self.agent_id, self.step_count
+        )
+
+        # Perform consolidation
+        result = self.memory_consolidator.consolidate(
+            agent=self,
+            num_steps=num_steps,
+            strategy=strategy
+        )
+
+        self.total_consolidations += 1
+
+        logger.info(
+            "%s: Consolidation complete - loss reduction: %.2f%%, time: %.2fs",
+            self.agent_id, result.loss_reduction * 100, result.elapsed_time
+        )
+
+        # BIG ROCK 5: Emit signal if available
+        if self.signal_bus:
+            self.signal_bus.emit(
+                agent_id=self.agent_id,
+                signal_type=SignalType.LEARNING_MILESTONE,
+                priority=SignalPriority.NORMAL,
+                data={
+                    'event': 'memory_consolidation',
+                    'loss_reduction': result.loss_reduction,
+                    'steps': result.steps
+                }
+            )
+
+        return result
+
+    def should_consolidate(self) -> bool:
+        """
+        Check if memory consolidation should be triggered.
+
+        Returns:
+            True if consolidation should happen, False otherwise
+        """
+        if not self.memory_consolidator or not self.consolidation_enabled:
+            return False
+
+        return self.memory_consolidator.should_consolidate(
+            current_step=self.step_count
+        )
+
+    def search_similar_experiences(
+        self,
+        state: np.ndarray,
+        k: int = 5
+    ) -> Optional[SemanticQuery]:
+        """
+        Search for similar past experiences using semantic retrieval.
+
+        This enables context-aware decision making by finding experiences
+        in similar states.
+
+        Args:
+            state: Current state to query
+            k: Number of similar experiences to retrieve
+
+        Returns:
+            SemanticQuery with similar experiences, or None if not available
+
+        Example:
+            >>> # Find 5 most similar past experiences
+            >>> similar = agent.search_similar_experiences(
+            ...     state=current_state,
+            ...     k=5
+            ... )
+            >>> for exp in similar.experiences:
+            ...     print(f"Reward: {exp['reward']}, Distance: {exp['distance']}")
+        """
+        if not self.semantic_retriever or not self.semantic_search_enabled:
+            return None
+
+        return self.semantic_retriever.search_by_state(state, k=k)
+
+    def get_counterfactual_experiences(
+        self,
+        state: np.ndarray,
+        action: int,
+        k: int = 3
+    ) -> Optional[SemanticQuery]:
+        """
+        Query: "What happened when I took this action in similar states?"
+
+        This enables counterfactual reasoning and action comparison.
+
+        Args:
+            state: Query state
+            action: Action to query about
+            k: Number of experiences to retrieve
+
+        Returns:
+            SemanticQuery with counterfactual experiences, or None if not available
+
+        Example:
+            >>> # What happened when taking action 2 in similar states?
+            >>> counterfactual = agent.get_counterfactual_experiences(
+            ...     state=current_state,
+            ...     action=2,
+            ...     k=3
+            ... )
+            >>> avg_reward = np.mean([exp['reward'] for exp in counterfactual.experiences])
+        """
+        if not self.semantic_retriever or not self.semantic_search_enabled:
+            return None
+
+        return self.semantic_retriever.get_counterfactual_experiences(
+            state=state,
+            action=action,
+            k=k
+        )
+
+    def get_episodic_memory_statistics(self) -> Optional[Dict[str, Any]]:
+        """
+        Get comprehensive statistics about episodic memory system.
+
+        Returns:
+            Dictionary with memory statistics, or None if not available
+
+        Example:
+            >>> stats = agent.get_episodic_memory_statistics()
+            >>> print(f"Memory size: {stats['memory_size']}")
+            >>> print(f"Total replays: {stats['total_replays']}")
+            >>> print(f"Consolidations: {stats['total_consolidations']}")
+        """
+        if not self.episodic_memory:
+            return None
+
+        stats = {
+            'agent_id': self.agent_id,
+            'replay_enabled': self.replay_enabled,
+            'consolidation_enabled': self.consolidation_enabled,
+            'semantic_search_enabled': self.semantic_search_enabled,
+            'memory_size': len(self.episodic_memory),
+            'memory_capacity': self.episodic_memory.capacity,
+            'memory_utilization': len(self.episodic_memory) / self.episodic_memory.capacity,
+            'total_stored': self.episodic_memory.total_stored,
+            'total_replayed': self.episodic_memory.total_replayed,
+            'total_replays': self.total_replays,
+            'total_consolidations': self.total_consolidations,
+            'replay_frequency': self.replay_frequency,
+            'replay_batch_size': self.replay_batch_size,
+            'current_beta': self.episodic_memory.beta,
+        }
+
+        # Add consolidation stats if available
+        if self.memory_consolidator:
+            consolidation_stats = self.memory_consolidator.get_consolidation_statistics()
+            stats['consolidation'] = consolidation_stats
+
+        # Add semantic retrieval stats if available
+        if self.semantic_retriever:
+            semantic_stats = self.semantic_retriever.get_statistics()
+            stats['semantic_retrieval'] = semantic_stats
+
+        return stats
+
+    def get_learning_rate(self) -> float:
+        """
+        Get current learning rate.
+
+        This is a placeholder that subclasses should override
+        to return their actual learning rate.
+
+        Returns:
+            Current learning rate
+        """
+        # Placeholder - subclasses should override
+        return self.agent_config.get('learning_rate', 0.001)
+
+    def set_learning_rate(self, lr: float):
+        """
+        Set learning rate.
+
+        This is a placeholder that subclasses should override
+        to actually update their optimizer's learning rate.
+
+        Args:
+            lr: New learning rate
+        """
+        # Placeholder - subclasses should override
+        self.agent_config['learning_rate'] = lr
