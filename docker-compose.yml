@@ -1,0 +1,184 @@
+version: '3.8'
+
+# ============================================================================
+# Mycelial Agent Engine (MAE) - Docker Compose Configuration
+# ============================================================================
+#
+# This file defines the full MAE stack with all required services:
+# - Redis: Message broker and data backbone
+# - ChromaDB: Vector database for policy embeddings
+# - MAE Application: The agent system itself
+#
+# Usage:
+#   docker-compose up -d          # Start all services
+#   docker-compose down           # Stop all services
+#   docker-compose logs -f mae    # View MAE logs
+#   docker-compose ps             # Check service status
+#
+# ============================================================================
+
+services:
+  # ==========================================================================
+  # Redis - Message Broker and Data Backbone
+  # ==========================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: mae_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+      - ./config/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    command: redis-server /usr/local/etc/redis/redis.conf
+    networks:
+      - mae_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+
+  # ==========================================================================
+  # ChromaDB - Vector Database for Collective Memory
+  # ==========================================================================
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: mae_chromadb
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - chromadb_data:/chroma/chroma
+    environment:
+      - CHROMA_SERVER_HOST=0.0.0.0
+      - CHROMA_SERVER_HTTP_PORT=8000
+      - ANONYMIZED_TELEMETRY=False
+      - ALLOW_RESET=True
+      - IS_PERSISTENT=True
+    networks:
+      - mae_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+
+  # ==========================================================================
+  # MAE Application - Agent System
+  # ==========================================================================
+  mae:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mae_app
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      chromadb:
+        condition: service_healthy
+    volumes:
+      - ./src:/app/src:ro
+      - ./config:/app/config:ro
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./simulation_results:/app/simulation_results
+    environment:
+      # Redis connection
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+
+      # Vector DB connection
+      - VECTOR_DB_BACKEND=chromadb
+      - VECTOR_DB_HOST=chromadb
+      - VECTOR_DB_PORT=8000
+
+      # Application settings
+      - MAE_CONFIG_PATH=/app/config/config.yaml
+      - LOG_LEVEL=INFO
+      - PYTHONUNBUFFERED=1
+    networks:
+      - mae_network
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2.0'
+        reservations:
+          memory: 1G
+          cpus: '1.0'
+    # Choose which mode to run (uncomment one):
+    command: python run_simulation.py
+    # command: python run_live.py
+
+  # ==========================================================================
+  # Optional: Redis Commander - Web UI for Redis
+  # ==========================================================================
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: mae_redis_ui
+    restart: unless-stopped
+    profiles:
+      - debug
+    ports:
+      - "8081:8081"
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+    networks:
+      - mae_network
+    depends_on:
+      - redis
+
+  # ==========================================================================
+  # Optional: Data Producer (Example)
+  # ==========================================================================
+  # Uncomment and customize for your domain
+  # data-producer:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.producer
+  #   container_name: mae_data_producer
+  #   restart: unless-stopped
+  #   depends_on:
+  #     - redis
+  #   environment:
+  #     - REDIS_HOST=redis
+  #     - REDIS_PORT=6379
+  #     - DATA_SOURCE_API_KEY=${DATA_SOURCE_API_KEY}
+  #   networks:
+  #     - mae_network
+  #   command: python src/connectors/your_producer.py
+
+# ============================================================================
+# Networks
+# ============================================================================
+networks:
+  mae_network:
+    driver: bridge
+    name: mae_network
+
+# ============================================================================
+# Volumes
+# ============================================================================
+volumes:
+  redis_data:
+    name: mae_redis_data
+    driver: local
+
+  chromadb_data:
+    name: mae_chromadb_data
+    driver: local

@@ -1,0 +1,258 @@
+# ============================================================================
+# Mycelial Agent Engine (MAE) Configuration
+# ============================================================================
+#
+# This file contains all configuration for the MAE system.
+# Override these values for your specific deployment.
+#
+# Environment variables take precedence over these settings.
+# Example: REDIS_HOST=prod-redis.example.com
+# ============================================================================
+
+# ============================================================================
+# Redis Configuration
+# ============================================================================
+redis:
+  host: localhost
+  port: 6379
+  db: 0
+  password: null  # Set to your Redis password if authentication is enabled
+  max_connections: 50
+  socket_timeout: 5
+  socket_connect_timeout: 5
+  decode_responses: true
+
+# ============================================================================
+# Vector Database Configuration (Collective Memory)
+# ============================================================================
+vector_db:
+  backend: chromadb  # Options: chromadb, milvus, qdrant
+  host: localhost
+  port: 8000
+  collection_name: mae_policies
+  embedding_dim: 128  # Dimension of policy embeddings
+  persist_directory: data/chromadb
+  similarity_metric: cosine  # Options: cosine, euclidean, dot_product
+
+# ============================================================================
+# SQLite Logger Configuration (Persistent Logging)
+# ============================================================================
+sqlite:
+  db_path: data/mae_system.db
+  queue_size: 10000  # Maximum write queue size
+  batch_size: 100    # Number of writes to batch
+  flush_interval: 1.0  # Seconds between flushes
+  cleanup_days: 30   # Days to retain old data
+
+# ============================================================================
+# Agent Configuration
+# ============================================================================
+agents:
+  # Agent population
+  num_specialists: 10      # Number of specialist (worker) agents
+  num_data_miners: 1       # Number of data miner agents
+  num_risk_managers: 1     # Number of risk manager agents
+
+  # Specialist agent learning parameters
+  learning_rate: 0.01
+  exploration_rate: 0.1    # Initial exploration rate (epsilon)
+  exploration_decay: 0.995 # Decay factor per step
+  min_exploration: 0.01    # Minimum exploration rate
+  buffer_size: 1000        # Experience replay buffer size
+
+  # Data miner agent parameters
+  batch_size: 10
+  validation_enabled: true
+
+  # Risk manager agent parameters
+  monitoring_interval: 5       # Steps between risk assessments
+  risk_threshold: 0.7          # Threshold for triggering interventions
+  contagion_threshold: 0.5     # Threshold for contagion detection
+  auto_intervention: true      # Enable automatic interventions
+
+# ============================================================================
+# Federated Reinforcement Learning (FRL) Configuration
+# ============================================================================
+frl:
+  enabled: true
+
+  # Policy sharing strategy
+  # Options: broadcast, selective, neighborhood, performance_based, random
+  update_strategy: selective
+
+  # Aggregation method for combining peer policies
+  # Options: weighted_average, median, federated_averaging, trust_weighted, gradient_based
+  aggregation_method: weighted_average
+
+  share_frequency: 10  # Share policy every N steps
+  min_peer_trust: 0.3  # Minimum trust score to accept updates
+  max_peers: 5         # Maximum number of peers to share with
+
+# ============================================================================
+# Value-Decomposition Networks (VDN) Configuration
+# ============================================================================
+vdn:
+  enabled: true
+
+  # Decomposition method
+  # Options: additive, monotonic, weighted, context_dependent, hierarchical
+  decomposition_method: additive
+
+  # Credit assignment strategy
+  # Options: difference_rewards, shapley_value, counterfactual, attention_based, temporal
+  credit_strategy: difference_rewards
+
+  discount_factor: 0.99  # Temporal discount factor (gamma)
+
+# ============================================================================
+# HAVEN Risk Coordination Configuration
+# ============================================================================
+haven:
+  enabled: true
+  risk_threshold: 0.7          # Risk score threshold for interventions
+  contagion_threshold: 0.5     # Contagion detection threshold
+  intervention_enabled: true   # Allow automated interventions
+  max_isolation_time: 100      # Maximum steps an agent can be isolated
+  risk_history_window: 50      # Number of steps to track for risk trends
+
+# ============================================================================
+# Simulation Configuration
+# ============================================================================
+simulation:
+  mode: simulation  # Options: simulation, live
+  num_steps: 1000   # Number of simulation steps
+  random_seed: 42   # Random seed for reproducibility (null for random)
+  log_level: INFO   # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  step_delay: 0.0   # Delay in seconds between steps (0 = no delay)
+
+# ============================================================================
+# Redis Streams Configuration
+# ============================================================================
+streams:
+  data_ingestion_stream: mae:data_ingestion  # Main data input stream
+  max_stream_length: 10000   # Maximum entries in stream (for trimming)
+  read_batch_size: 100       # Number of entries to read at once
+  block_timeout_ms: 1000     # Milliseconds to wait for new data
+
+# ============================================================================
+# Redis Pub/Sub Configuration
+# ============================================================================
+pubsub:
+  agent_messages_channel: mae:agent_messages     # Agent-to-agent messages
+  system_events_channel: mae:system_events       # System-wide events
+  risk_alerts_channel: mae:risk_alerts           # Risk management alerts
+  health_reports_channel: mae:health_reports     # Health status reports
+
+# ============================================================================
+# External API Configuration
+# ============================================================================
+api:
+  # Add your domain-specific API keys and endpoints here
+  data_source_api_key: null       # Your data source API key
+  data_source_endpoint: null      # Your data source endpoint
+  enable_external_apis: false     # Enable external API calls
+
+  # Example for different domains:
+  #
+  # Finance domain:
+  # stock_api_key: "YOUR_ALPHAVANTAGE_KEY"
+  # stock_api_endpoint: "https://www.alphavantage.co/query"
+  #
+  # Logistics domain:
+  # maps_api_key: "YOUR_GOOGLE_MAPS_KEY"
+  # maps_api_endpoint: "https://maps.googleapis.com/maps/api"
+  #
+  # Cybersecurity domain:
+  # threat_intel_api_key: "YOUR_THREATINTEL_KEY"
+  # threat_intel_endpoint: "https://api.threatintel.com/v1"
+
+# ============================================================================
+# Logging Configuration
+# ============================================================================
+logging:
+  level: INFO  # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  log_to_file: true
+  log_file_path: logs/mae.log
+  max_log_file_size: 10485760  # 10 MB
+  backup_count: 5   # Number of backup log files to keep
+
+# ============================================================================
+# Performance and Optimization Configuration
+# ============================================================================
+performance:
+  enable_profiling: false           # Enable performance profiling
+  enable_metrics_collection: true   # Collect performance metrics
+  metrics_collection_interval: 10   # Steps between metric collection
+  enable_caching: true              # Enable result caching
+  cache_ttl: 300                    # Cache time-to-live in seconds
+
+# ============================================================================
+# Development/Testing Overrides
+# ============================================================================
+# Uncomment and modify these for development/testing:
+
+# development:
+#   redis:
+#     db: 1  # Use separate DB for development
+#   simulation:
+#     num_steps: 100  # Shorter runs for testing
+#     log_level: DEBUG
+#   agents:
+#     num_specialists: 5  # Fewer agents for faster iteration
+
+# ============================================================================
+# Production Overrides
+# ============================================================================
+# Uncomment and modify these for production deployment:
+
+# production:
+#   redis:
+#     host: redis-cluster.example.com
+#     port: 6379
+#     password: "YOUR_SECURE_PASSWORD"
+#     max_connections: 100
+#   vector_db:
+#     backend: milvus
+#     host: vectordb-cluster.example.com
+#   agents:
+#     num_specialists: 50
+#   haven:
+#     intervention_enabled: true
+#   logging:
+#     level: WARNING
+#     log_file_path: /var/log/mae/mae.log
+
+# ============================================================================
+# Adversarial Testing Configuration
+# ============================================================================
+# Used by the adversarial simulation runner
+
+adversarial_testing:
+  num_healthy_agents: 10
+  num_toxic_agents: 2
+  toxic_behavior: policy_poisoning  # Options: manipulative, high_risk, buggy, policy_poisoning, sabotage, byzantine
+  toxicity_level: 0.8
+  test_duration_steps: 1000
+  enable_evasion: false
+
+# ============================================================================
+# Docker Deployment Configuration
+# ============================================================================
+# These settings are used when deploying via docker-compose
+
+docker:
+  redis_image: redis:7-alpine
+  chromadb_image: chromadb/chroma:latest
+  app_image: mae:latest
+
+  # Resource limits
+  redis_memory_limit: 512m
+  chromadb_memory_limit: 1g
+  app_memory_limit: 2g
+
+  # Restart policies
+  restart_policy: unless-stopped
+
+  # Network configuration
+  network_name: mae_network

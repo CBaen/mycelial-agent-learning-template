@@ -1,0 +1,139 @@
+# ============================================================================
+# Mycelial Agent Engine (MAE) - Python Dependencies
+# ============================================================================
+#
+# Install all dependencies:
+#   pip install -r requirements.txt
+#
+# Install core dependencies only:
+#   pip install -r requirements.txt --no-deps
+#   (then manually install mesa, redis, numpy)
+#
+# ============================================================================
+
+# ============================================================================
+# Core Dependencies (REQUIRED)
+# ============================================================================
+
+# Agent-based modeling framework
+mesa>=2.1.0
+
+# Redis client for data backbone
+redis>=5.0.0
+
+# Numerical computing
+numpy>=1.24.0
+
+# YAML configuration parsing
+pyyaml>=6.0
+
+# ============================================================================
+# Vector Database Dependencies
+# ============================================================================
+
+# ChromaDB (default, embedded vector DB)
+chromadb>=0.4.0
+
+# Alternative: Milvus client (uncomment if using Milvus)
+# pymilvus>=2.3.0
+
+# Alternative: Qdrant client (uncomment if using Qdrant)
+# qdrant-client>=1.6.0
+
+# ============================================================================
+# Machine Learning Dependencies (OPTIONAL but recommended)
+# ============================================================================
+
+# For clustering and pattern recognition
+scikit-learn>=1.3.0
+
+# Deep learning (if implementing neural network policies)
+# torch>=2.0.0
+# tensorflow>=2.13.0
+
+# ============================================================================
+# Data Processing Dependencies
+# ============================================================================
+
+# DataFrame operations (useful for data analysis)
+pandas>=2.0.0
+
+# HTTP requests (for external APIs)
+requests>=2.31.0
+
+# ============================================================================
+# Development Dependencies (OPTIONAL)
+# ============================================================================
+
+# Testing
+pytest>=7.4.0
+pytest-cov>=4.1.0
+pytest-asyncio>=0.21.0
+
+# Code quality
+black>=23.7.0
+flake8>=6.1.0
+mypy>=1.5.0
+pylint>=2.17.0
+
+# Type hints
+types-redis>=4.6.0
+types-PyYAML>=6.0.0
+types-requests>=2.31.0
+
+# ============================================================================
+# Monitoring and Observability (OPTIONAL)
+# ============================================================================
+
+# Prometheus metrics
+prometheus-client>=0.17.0
+
+# Logging
+structlog>=23.1.0
+
+# Performance profiling
+py-spy>=0.3.14
+memory-profiler>=0.61.0
+
+# ============================================================================
+# Production Dependencies (OPTIONAL)
+# ============================================================================
+
+# Process management
+gunicorn>=21.2.0
+
+# Environment variable management
+python-dotenv>=1.0.0
+
+# Health checks
+healthcheck>=1.3.3
+
+# ============================================================================
+# Adversarial Testing Dependencies
+# ============================================================================
+
+# Statistical testing
+scipy>=1.11.0
+
+# Visualization (for test reports)
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# ============================================================================
+# Documentation Dependencies (OPTIONAL)
+# ============================================================================
+
+# Sphinx for documentation generation
+# sphinx>=7.1.0
+# sphinx-rtd-theme>=1.3.0
+
+# ============================================================================
+# Version Constraints
+# ============================================================================
+# These ensure compatibility between packages
+
+# Pin Python version (in case using pyenv or similar)
+# python_requires>=3.8,<4.0
+
+# Avoid known incompatibilities
+# urllib3>=1.26.0,<2.0.0  # For requests compatibility
