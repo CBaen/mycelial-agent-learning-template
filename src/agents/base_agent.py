@@ -11,9 +11,11 @@ Rule of 3:
 """
 
 from mesa import Agent
-from typing import Dict, Any, Optional, List, Callable
+from typing import Dict, Any, Optional, List, Callable, Tuple
+from collections import defaultdict
 import logging
 import sys
+import time
 from pathlib import Path
 
 # Add parent directory to path
@@ -22,6 +24,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 # BIG ROCK 5: ELECTRICAL SIGNALING LAYER
 from src.core.electrical_signal import ElectricalSignalBus, Signal, SignalPriority
 from src.core.signal_types import SignalType
+
+# BIG ROCK 6: STIGMERGIC ENVIRONMENT
+from src.core.stigmergy import StigmergicEnvironment, StigmergicMarker
+from src.core.marker_types import MarkerType
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +59,8 @@ class MycelialAgent(Agent):
         unique_id: Optional[int] = None,
         team_id: str = "default",
         agent_config: Optional[Dict[str, Any]] = None,
-        signal_bus: Optional[ElectricalSignalBus] = None
+        signal_bus: Optional[ElectricalSignalBus] = None,
+        stigmergy_env: Optional[StigmergicEnvironment] = None
     ):
         """
         Initialize the Mycelial Agent.
@@ -65,6 +72,7 @@ class MycelialAgent(Agent):
             team_id: Team identifier for collaboration (Rule of 3)
             agent_config: Optional configuration dictionary for agent parameters
             signal_bus: Optional ElectricalSignalBus for ultra-fast signaling (Big Rock 5)
+            stigmergy_env: Optional StigmergicEnvironment for indirect coordination (Big Rock 6)
         """
         super().__init__(model)
 
@@ -88,6 +96,12 @@ class MycelialAgent(Agent):
         # BIG ROCK 5: ELECTRICAL SIGNALING
         self.signal_bus = signal_bus  # Ultra-fast signaling bus
         self.signal_subscriptions: List[str] = []  # Track subscribed signal types
+
+        # BIG ROCK 6: STIGMERGIC ENVIRONMENT
+        self.stigmergy_env = stigmergy_env  # Pheromone-like marker environment
+        self.stigmergy_position: Tuple[float, ...] = (0.0, 0.0)  # 2D default position
+        self.sensing_radius: float = self.agent_config.get("sensing_radius", 5.0)
+        self.trail_following_enabled: bool = self.agent_config.get("trail_following", True)
 
         # State tracking
         self.current_state: Dict[str, Any] = {}
@@ -1441,6 +1455,279 @@ class MycelialAgent(Agent):
             "subscriptions": self.signal_subscriptions,
             "subscription_count": len(self.signal_subscriptions),
             "bus_metrics": bus_metrics
+        }
+
+    # =========================================================================
+    # BIG ROCK 6: STIGMERGIC ENVIRONMENT (Indirect Coordination)
+    # =========================================================================
+
+    def deposit_marker(
+        self,
+        marker_type: str,
+        intensity: float = 1.0,
+        position: Optional[Tuple[float, ...]] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> Optional[str]:
+        """
+        Deposit a stigmergic marker at a position.
+
+        Markers create environmental "pheromone trails" that other agents
+        can sense and follow, enabling indirect coordination.
+
+        Args:
+            marker_type: Type of marker (SUCCESS, DANGER, etc.)
+            intensity: Marker intensity (0.0-1.0)
+            position: Position to deposit (uses current position if None)
+            metadata: Additional marker data
+
+        Returns:
+            Marker ID if successful, None if no stigmergy environment
+
+        Example:
+            # Deposit success marker after high reward
+            if reward > 5.0:
+                agent.deposit_marker(MarkerType.SUCCESS, intensity=reward/10)
+        """
+        if self.stigmergy_env is None:
+            return None
+
+        pos = position if position is not None else self.stigmergy_position
+
+        return self.stigmergy_env.deposit_marker(
+            marker_type=marker_type,
+            position=pos,
+            agent_id=self.agent_id,
+            intensity=intensity,
+            metadata=metadata
+        )
+
+    def deposit_success_marker(self, reward: float):
+        """
+        Deposit SUCCESS marker at current position (convenience method).
+
+        Args:
+            reward: Reward value (used to determine intensity)
+        """
+        if self.stigmergy_env and reward > 0:
+            intensity = min(1.0, reward / 10.0)  # Normalize to 0-1
+            self.deposit_marker(
+                MarkerType.SUCCESS,
+                intensity=intensity,
+                metadata={'reward': reward}
+            )
+
+    def deposit_danger_marker(self, risk_level: float):
+        """
+        Deposit DANGER marker at current position (convenience method).
+
+        Args:
+            risk_level: Risk level (0.0-1.0)
+        """
+        if self.stigmergy_env and risk_level > 0.5:
+            self.deposit_marker(
+                MarkerType.DANGER,
+                intensity=risk_level,
+                metadata={'risk_score': self.risk_score}
+            )
+
+    def deposit_exploration_marker(self):
+        """
+        Deposit EXPLORATION marker at current position (convenience method).
+
+        Marks area as explored to guide other agents toward novelty.
+        """
+        if self.stigmergy_env:
+            self.deposit_marker(
+                MarkerType.EXPLORATION,
+                intensity=0.5,
+                metadata={'visit_count': 1, 'timestamp': time.time()}
+            )
+
+    def sense_markers(
+        self,
+        marker_types: Optional[List[str]] = None,
+        radius: Optional[float] = None
+    ) -> List[StigmergicMarker]:
+        """
+        Sense markers near current position.
+
+        Args:
+            marker_types: Filter by marker types (None = all types)
+            radius: Sensing radius (uses agent's sensing_radius if None)
+
+        Returns:
+            List of markers sorted by intensity (strongest first)
+
+        Example:
+            # Sense nearby success markers
+            success_markers = agent.sense_markers([MarkerType.SUCCESS])
+            if success_markers:
+                print(f"Found {len(success_markers)} success trails")
+        """
+        if self.stigmergy_env is None:
+            return []
+
+        r = radius if radius is not None else self.sensing_radius
+
+        return self.stigmergy_env.sense_markers(
+            self.stigmergy_position,
+            r,
+            marker_types
+        )
+
+    def sense_environment(self) -> Dict[str, List[StigmergicMarker]]:
+        """
+        Sense all markers in sensing radius, grouped by type.
+
+        Returns:
+            Dictionary mapping marker types to lists of markers
+
+        Example:
+            markers = agent.sense_environment()
+            if MarkerType.DANGER in markers:
+                print(f"Warning: {len(markers[MarkerType.DANGER])} danger zones nearby")
+        """
+        if self.stigmergy_env is None:
+            return {}
+
+        all_markers = self.sense_markers()
+
+        # Group by type
+        by_type = defaultdict(list)
+        for marker in all_markers:
+            by_type[marker.marker_type].append(marker)
+
+        return dict(by_type)
+
+    def follow_trail(
+        self,
+        marker_type: str,
+        attractive: bool = True
+    ) -> Tuple[float, ...]:
+        """
+        Get direction to follow markers of a specific type.
+
+        Computes gradient pointing toward (attractive) or away from
+        (repulsive) markers, for trail following behavior.
+
+        Args:
+            marker_type: Type of marker to follow
+            attractive: True = move toward, False = move away
+
+        Returns:
+            Normalized direction vector (gradient)
+
+        Example:
+            # Follow success trails
+            direction = agent.follow_trail(MarkerType.SUCCESS, attractive=True)
+            agent.move_in_stigmergy(direction, step_size=1.0)
+
+            # Avoid danger zones
+            escape = agent.follow_trail(MarkerType.DANGER, attractive=False)
+            agent.move_in_stigmergy(escape, step_size=2.0)
+        """
+        if self.stigmergy_env is None:
+            return tuple(0.0 for _ in range(len(self.stigmergy_position)))
+
+        return self.stigmergy_env.get_gradient(
+            self.stigmergy_position,
+            marker_type,
+            radius=self.sensing_radius,
+            attractive=attractive
+        )
+
+    def move_in_stigmergy(
+        self,
+        direction: Tuple[float, ...],
+        step_size: float = 1.0
+    ):
+        """
+        Move in stigmergic space.
+
+        Updates agent's position in the stigmergic environment.
+
+        Args:
+            direction: Normalized direction vector
+            step_size: Distance to move
+
+        Example:
+            # Move toward success
+            direction = agent.follow_trail(MarkerType.SUCCESS)
+            agent.move_in_stigmergy(direction, step_size=1.0)
+        """
+        if len(direction) != len(self.stigmergy_position):
+            logger.warning(f"{self.agent_id}: Direction dimension mismatch")
+            return
+
+        new_position = tuple(
+            self.stigmergy_position[i] + direction[i] * step_size
+            for i in range(len(self.stigmergy_position))
+        )
+
+        self.stigmergy_position = new_position
+
+        logger.debug(f"{self.agent_id} moved to {new_position}")
+
+    def get_strongest_nearby_marker(
+        self,
+        marker_type: Optional[str] = None
+    ) -> Optional[StigmergicMarker]:
+        """
+        Get strongest marker within sensing radius.
+
+        Args:
+            marker_type: Filter by type (None = all types)
+
+        Returns:
+            Strongest marker or None if no markers
+        """
+        if self.stigmergy_env is None:
+            return None
+
+        return self.stigmergy_env.get_strongest_marker(
+            self.stigmergy_position,
+            self.sensing_radius,
+            marker_type
+        )
+
+    def set_stigmergy_position(self, position: Tuple[float, ...]):
+        """
+        Manually set position in stigmergic space.
+
+        Args:
+            position: New position coordinates
+
+        Raises:
+            ValueError: If position has wrong number of dimensions
+        """
+        if self.stigmergy_env:
+            expected_dims = self.stigmergy_env.dimensions
+            if len(position) != expected_dims:
+                raise ValueError(f"Position must have {expected_dims} dimensions")
+
+        self.stigmergy_position = position
+
+    def get_stigmergy_statistics(self) -> Optional[Dict[str, Any]]:
+        """
+        Get stigmergy statistics for this agent.
+
+        Returns:
+            Dictionary with position and nearby marker counts, or None
+        """
+        if self.stigmergy_env is None:
+            return None
+
+        nearby = self.sense_environment()
+
+        return {
+            'agent_id': self.agent_id,
+            'position': self.stigmergy_position,
+            'sensing_radius': self.sensing_radius,
+            'nearby_markers': {
+                mtype: len(markers)
+                for mtype, markers in nearby.items()
+            },
+            'total_nearby': sum(len(m) for m in nearby.values())
         }
 
     def reset(self):
