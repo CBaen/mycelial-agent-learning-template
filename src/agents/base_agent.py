@@ -11,13 +11,17 @@ Rule of 3:
 """
 
 from mesa import Agent
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Callable
 import logging
 import sys
 from pathlib import Path
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+# BIG ROCK 5: ELECTRICAL SIGNALING LAYER
+from src.core.electrical_signal import ElectricalSignalBus, Signal, SignalPriority
+from src.core.signal_types import SignalType
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +52,8 @@ class MycelialAgent(Agent):
         redis_client,
         unique_id: Optional[int] = None,
         team_id: str = "default",
-        agent_config: Optional[Dict[str, Any]] = None
+        agent_config: Optional[Dict[str, Any]] = None,
+        signal_bus: Optional[ElectricalSignalBus] = None
     ):
         """
         Initialize the Mycelial Agent.
@@ -59,6 +64,7 @@ class MycelialAgent(Agent):
             unique_id: Optional unique identifier for this agent (auto-assigned if None)
             team_id: Team identifier for collaboration (Rule of 3)
             agent_config: Optional configuration dictionary for agent parameters
+            signal_bus: Optional ElectricalSignalBus for ultra-fast signaling (Big Rock 5)
         """
         super().__init__(model)
 
@@ -78,6 +84,10 @@ class MycelialAgent(Agent):
         self.frl_engine = None  # Federated Reinforcement Learning engine
         self.vdn_engine = None  # Value Decomposition Network engine
         self.vector_db = None   # Vector database for team policies
+
+        # BIG ROCK 5: ELECTRICAL SIGNALING
+        self.signal_bus = signal_bus  # Ultra-fast signaling bus
+        self.signal_subscriptions: List[str] = []  # Track subscribed signal types
 
         # State tracking
         self.current_state: Dict[str, Any] = {}
@@ -1090,6 +1100,19 @@ class MycelialAgent(Agent):
             # Achievements give XP bonus
             self.experience_points += 500
 
+            # BIG ROCK 5: Emit electrical signal to broadcast achievement
+            if self.signal_bus is not None:
+                self.emit_signal(
+                    SignalType.ACHIEVEMENT_UNLOCKED,
+                    {
+                        'achievement_name': achievement_name,
+                        'agent_level': self.agent_level,
+                        'experience_points': self.experience_points,
+                        'description': f"Agent {self.agent_id} unlocked: {achievement_name}"
+                    },
+                    priority=SignalPriority.LOW
+                )
+
     def get_gamification_status(self) -> Dict[str, Any]:
         """
         Get current gamification status.
@@ -1112,6 +1135,312 @@ class MycelialAgent(Agent):
             "team_rank": self.team_rank,
             "satisfaction_score": self.satisfaction_score,
             "has_converged": self.has_reached_convergence
+        }
+
+    # =========================================================================
+    # BIG ROCK 5: ELECTRICAL SIGNALING LAYER
+    # =========================================================================
+
+    def emit_signal(
+        self,
+        signal_type: str,
+        payload: Dict[str, Any],
+        priority: SignalPriority = SignalPriority.NORMAL,
+        ttl: float = 0.0
+    ) -> bool:
+        """
+        Emit an electrical signal to the mycelial network.
+
+        Electrical signals provide ultra-fast (sub-millisecond) communication
+        for critical events like dangers, opportunities, and convergence.
+
+        Args:
+            signal_type: Type of signal (use SignalType constants)
+            payload: Signal data dictionary
+            priority: Signal priority (CRITICAL, HIGH, NORMAL, LOW)
+            ttl: Time-to-live in seconds (0 = infinite)
+
+        Returns:
+            True if signal emitted successfully, False if no signal bus or rate limited
+
+        Example:
+            agent.emit_signal(
+                SignalType.DANGER,
+                {'risk_level': 0.9, 'risk_type': 'policy_divergence'},
+                priority=SignalPriority.CRITICAL
+            )
+        """
+        if self.signal_bus is None:
+            logger.debug("%s has no signal bus, cannot emit signal", self.agent_id)
+            return False
+
+        success = self.signal_bus.emit_signal(
+            signal_type=signal_type,
+            source_agent_id=self.agent_id,
+            payload=payload,
+            priority=priority,
+            ttl=ttl
+        )
+
+        if success:
+            logger.debug("%s emitted %s signal (priority=%s)",
+                        self.agent_id, signal_type, priority.name)
+
+            # Emit ACHIEVEMENT_UNLOCKED signal when achievement is unlocked
+            if signal_type == SignalType.ACHIEVEMENT_UNLOCKED:
+                self._handle_achievement_signal(payload)
+
+        return success
+
+    def subscribe_to_signal(
+        self,
+        signal_type: str,
+        callback: Callable[[Signal], None],
+        min_priority: SignalPriority = SignalPriority.LOW
+    ) -> bool:
+        """
+        Subscribe to electrical signals of a specific type.
+
+        The callback will be invoked whenever a signal of this type is received.
+        Callbacks execute asynchronously in a thread pool.
+
+        Args:
+            signal_type: Type of signal to subscribe to
+            callback: Function to call when signal received (takes Signal object)
+            min_priority: Only receive signals at or above this priority
+
+        Returns:
+            True if subscription successful
+
+        Example:
+            def handle_danger(signal: Signal):
+                risk_level = signal.payload.get('risk_level', 0)
+                if risk_level > 0.8:
+                    self.take_evasive_action()
+
+            agent.subscribe_to_signal(
+                SignalType.DANGER,
+                handle_danger,
+                min_priority=SignalPriority.HIGH
+            )
+        """
+        if self.signal_bus is None:
+            logger.warning("%s has no signal bus, cannot subscribe", self.agent_id)
+            return False
+
+        success = self.signal_bus.subscribe(
+            signal_type=signal_type,
+            agent_id=self.agent_id,
+            callback=callback,
+            min_priority=min_priority
+        )
+
+        if success:
+            self.signal_subscriptions.append(signal_type)
+            logger.debug("%s subscribed to %s signals (min_priority=%s)",
+                        self.agent_id, signal_type, min_priority.name)
+
+        return success
+
+    def unsubscribe_from_signal(self, signal_type: str) -> bool:
+        """
+        Unsubscribe from electrical signals.
+
+        Args:
+            signal_type: Type of signal to unsubscribe from
+
+        Returns:
+            True if unsubscription successful
+        """
+        if self.signal_bus is None:
+            return False
+
+        success = self.signal_bus.unsubscribe(signal_type, self.agent_id)
+
+        if success and signal_type in self.signal_subscriptions:
+            self.signal_subscriptions.remove(signal_type)
+            logger.debug("%s unsubscribed from %s signals", self.agent_id, signal_type)
+
+        return success
+
+    def setup_standard_signal_handlers(self):
+        """
+        Setup standard signal handlers for common signal types.
+
+        This is a convenience method that subscribes to commonly useful signals
+        with sensible default handlers. Agents can override this or add custom
+        handlers for their specific needs.
+        """
+        if self.signal_bus is None:
+            logger.warning("%s has no signal bus, skipping signal handler setup", self.agent_id)
+            return
+
+        # Subscribe to DANGER signals (critical priority)
+        self.subscribe_to_signal(
+            SignalType.DANGER,
+            self._handle_danger_signal,
+            min_priority=SignalPriority.CRITICAL
+        )
+
+        # Subscribe to OPPORTUNITY signals (high priority)
+        self.subscribe_to_signal(
+            SignalType.OPPORTUNITY,
+            self._handle_opportunity_signal,
+            min_priority=SignalPriority.HIGH
+        )
+
+        # Subscribe to CONVERGENCE signals from teammates
+        self.subscribe_to_signal(
+            SignalType.CONVERGENCE,
+            self._handle_convergence_signal,
+            min_priority=SignalPriority.HIGH
+        )
+
+        # Subscribe to COLLABORATION_REQUEST signals
+        self.subscribe_to_signal(
+            SignalType.COLLABORATION_REQUEST,
+            self._handle_collaboration_signal,
+            min_priority=SignalPriority.HIGH
+        )
+
+        # Subscribe to KNOWLEDGE_SHARE signals
+        self.subscribe_to_signal(
+            SignalType.KNOWLEDGE_SHARE,
+            self._handle_knowledge_share_signal,
+            min_priority=SignalPriority.NORMAL
+        )
+
+        logger.info("%s setup standard signal handlers", self.agent_id)
+
+    # Default signal handlers (can be overridden by subclasses)
+
+    def _handle_danger_signal(self, signal: Signal):
+        """
+        Handle DANGER signal from peer agent.
+
+        Default behavior: Increase caution, reduce risk-taking.
+        Subclasses can override for specific danger responses.
+
+        Args:
+            signal: Danger signal
+        """
+        risk_level = signal.payload.get('risk_level', 0.5)
+        risk_type = signal.payload.get('risk_type', 'unknown')
+
+        logger.warning("%s received DANGER signal: type=%s, level=%.2f from %s",
+                      self.agent_id, risk_type, risk_level, signal.source_agent_id)
+
+        # Default response: Increase own risk score temporarily
+        if risk_level > 0.7:
+            self.risk_score = min(1.0, self.risk_score + 0.2)
+            logger.info("%s increased risk score to %.2f in response to danger",
+                       self.agent_id, self.risk_score)
+
+    def _handle_opportunity_signal(self, signal: Signal):
+        """
+        Handle OPPORTUNITY signal from peer agent.
+
+        Default behavior: Log opportunity, subclasses can act on it.
+
+        Args:
+            signal: Opportunity signal
+        """
+        opportunity_type = signal.payload.get('opportunity_type', 'unknown')
+        expected_reward = signal.payload.get('expected_reward', 0)
+        confidence = signal.payload.get('confidence', 0)
+
+        logger.info("%s received OPPORTUNITY signal: type=%s, reward=%.2f, confidence=%.2f from %s",
+                   self.agent_id, opportunity_type, expected_reward, confidence,
+                   signal.source_agent_id)
+
+        # Subclasses can override to take action on opportunities
+
+    def _handle_convergence_signal(self, signal: Signal):
+        """
+        Handle CONVERGENCE signal from teammate.
+
+        Default behavior: Log convergence, update team statistics.
+
+        Args:
+            signal: Convergence signal
+        """
+        peer_level = signal.payload.get('agent_level', 0)
+        peer_satisfaction = signal.payload.get('satisfaction_score', 0)
+
+        logger.info("%s received CONVERGENCE signal from %s (level=%d, satisfaction=%.2f)",
+                   self.agent_id, signal.source_agent_id, peer_level, peer_satisfaction)
+
+        # Update team satisfaction estimate
+        if self.team_satisfaction is None:
+            self.team_satisfaction = peer_satisfaction
+        else:
+            # Exponential moving average
+            self.team_satisfaction = 0.9 * self.team_satisfaction + 0.1 * peer_satisfaction
+
+    def _handle_collaboration_signal(self, signal: Signal):
+        """
+        Handle COLLABORATION_REQUEST signal.
+
+        Default behavior: Log request, subclasses can accept/reject.
+
+        Args:
+            signal: Collaboration request signal
+        """
+        task_type = signal.payload.get('task_type', 'unknown')
+        urgency = signal.payload.get('urgency', 'medium')
+        reward_share = signal.payload.get('reward_share', 0)
+
+        logger.info("%s received COLLABORATION_REQUEST: task=%s, urgency=%s, reward=%.2f from %s",
+                   self.agent_id, task_type, urgency, reward_share, signal.source_agent_id)
+
+        # Subclasses can override to accept collaboration
+
+    def _handle_knowledge_share_signal(self, signal: Signal):
+        """
+        Handle KNOWLEDGE_SHARE signal.
+
+        Default behavior: Log shared knowledge, subclasses can integrate it.
+
+        Args:
+            signal: Knowledge share signal
+        """
+        knowledge_type = signal.payload.get('knowledge_type', 'unknown')
+        confidence = signal.payload.get('confidence', 0)
+
+        logger.info("%s received KNOWLEDGE_SHARE: type=%s, confidence=%.2f from %s",
+                   self.agent_id, knowledge_type, confidence, signal.source_agent_id)
+
+        # Subclasses can override to integrate shared knowledge
+
+    def _handle_achievement_signal(self, payload: Dict[str, Any]):
+        """
+        Handle achievement unlocked (internal, not a signal handler).
+
+        This broadcasts achievement to peers for social motivation.
+
+        Args:
+            payload: Achievement payload
+        """
+        logger.info("%s broadcasting achievement: %s",
+                   self.agent_id, payload.get('achievement_name', 'Unknown'))
+
+    def get_signal_statistics(self) -> Optional[Dict[str, Any]]:
+        """
+        Get electrical signaling statistics.
+
+        Returns:
+            Dictionary with signal metrics, or None if no signal bus
+        """
+        if self.signal_bus is None:
+            return None
+
+        bus_metrics = self.signal_bus.get_metrics()
+
+        return {
+            "agent_id": self.agent_id,
+            "subscriptions": self.signal_subscriptions,
+            "subscription_count": len(self.signal_subscriptions),
+            "bus_metrics": bus_metrics
         }
 
     def reset(self):
