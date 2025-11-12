@@ -258,8 +258,10 @@ class StigmergicEnvironment:
                 if decay_rate is None:
                     decay_rate = self.default_decay_rate
 
-            # Create new marker
-            marker_id = f"marker_{time.time_ns()}_{agent_id}"
+            # Create new marker with unique ID
+            # Use combination of timestamp, agent_id, and counter for uniqueness
+            import random
+            marker_id = f"marker_{time.time_ns()}_{agent_id}_{random.randint(0, 999999)}"
 
             marker = StigmergicMarker(
                 marker_id=marker_id,

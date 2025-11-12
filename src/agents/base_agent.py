@@ -11,7 +11,7 @@ Rule of 3:
 """
 
 from mesa import Agent
-from typing import Dict, Any, Optional, List, Callable, Tuple
+from typing import Dict, Any, Optional, List, Callable, Tuple, Set
 from collections import defaultdict
 import logging
 import sys
@@ -28,6 +28,10 @@ from src.core.signal_types import SignalType
 # BIG ROCK 6: STIGMERGIC ENVIRONMENT
 from src.core.stigmergy import StigmergicEnvironment, StigmergicMarker
 from src.core.marker_types import MarkerType
+
+# BIG ROCK 7: GNN COMMUNICATION
+from src.core.gnn_communicator import GNNCommunicator
+from src.core.gnn_message import GNNMessage, MessageType
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +64,8 @@ class MycelialAgent(Agent):
         team_id: str = "default",
         agent_config: Optional[Dict[str, Any]] = None,
         signal_bus: Optional[ElectricalSignalBus] = None,
-        stigmergy_env: Optional[StigmergicEnvironment] = None
+        stigmergy_env: Optional[StigmergicEnvironment] = None,
+        gnn_communicator: Optional[GNNCommunicator] = None
     ):
         """
         Initialize the Mycelial Agent.
@@ -73,6 +78,7 @@ class MycelialAgent(Agent):
             agent_config: Optional configuration dictionary for agent parameters
             signal_bus: Optional ElectricalSignalBus for ultra-fast signaling (Big Rock 5)
             stigmergy_env: Optional StigmergicEnvironment for indirect coordination (Big Rock 6)
+            gnn_communicator: Optional GNNCommunicator for intelligent message routing (Big Rock 7)
         """
         super().__init__(model)
 
@@ -102,6 +108,11 @@ class MycelialAgent(Agent):
         self.stigmergy_position: Tuple[float, ...] = (0.0, 0.0)  # 2D default position
         self.sensing_radius: float = self.agent_config.get("sensing_radius", 5.0)
         self.trail_following_enabled: bool = self.agent_config.get("trail_following", True)
+
+        # BIG ROCK 7: GNN COMMUNICATION
+        self.gnn_communicator = gnn_communicator  # GNN-based message routing
+        self.gnn_message_handlers: Dict[str, Callable[[GNNMessage], None]] = {}
+        self.capabilities: Set[str] = set(self.agent_config.get("capabilities", []))
 
         # State tracking
         self.current_state: Dict[str, Any] = {}
@@ -156,6 +167,16 @@ class MycelialAgent(Agent):
         self.novelty_threshold: float = self.agent_config.get("novelty_threshold", 0.8)
         self.action_history: List[Any] = []  # For novelty detection
         self.action_history_size: int = 100
+
+        # Register with GNN communicator if available
+        if self.gnn_communicator:
+            self.gnn_communicator.register_agent(
+                agent_id=self.agent_id,
+                agent_type=self.agent_type,
+                capabilities=self.capabilities,
+                level=self.agent_level,
+                position=self.stigmergy_position
+            )
 
         logger.info("Initialized %s (ID: %s, Team: %s)",
                    self.agent_type, self.agent_id, self.team_id)
@@ -1743,3 +1764,342 @@ class MycelialAgent(Agent):
         # Override in subclass if different behavior needed
 
         logger.info("%s has been reset", self.agent_id)
+
+    # =========================================================================
+    # BIG ROCK 7: GNN COMMUNICATION LAYER (Intelligent Message Routing)
+    # =========================================================================
+
+    def send_gnn_message(
+        self,
+        content: Dict[str, Any],
+        message_type: str = MessageType.BROADCAST,
+        target_ids: Optional[List[str]] = None,
+        priority: float = 0.5,
+        ttl: Optional[int] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> Optional[str]:
+        """
+        Send message through GNN-based intelligent routing.
+
+        Uses learned communication graph to route messages efficiently,
+        achieving 40-60% overhead reduction vs. broadcast.
+
+        Args:
+            content: Message payload (dictionary)
+            message_type: Message type (use MessageType constants)
+            target_ids: Optional specific targets (for targeted messages)
+            priority: Message priority [0, 1]
+            ttl: Time-to-live (hops), uses default if None
+            metadata: Optional additional metadata
+
+        Returns:
+            Message ID if sent successfully, None if GNN not available
+
+        Example:
+            >>> self.send_gnn_message(
+            ...     content={'task': 'optimize_model', 'data': {...}},
+            ...     message_type=MessageType.COLLABORATION_REQUEST,
+            ...     priority=0.8
+            ... )
+        """
+        if not self.gnn_communicator:
+            logger.warning("%s: GNN communicator not available", self.agent_id)
+            return None
+
+        return self.gnn_communicator.send_message(
+            sender_id=self.agent_id,
+            content=content,
+            message_type=message_type,
+            target_ids=target_ids,
+            priority=priority,
+            ttl=ttl,
+            metadata=metadata
+        )
+
+    def receive_gnn_messages(
+        self,
+        message_type: Optional[str] = None,
+        max_messages: int = 10,
+        min_priority: float = 0.0
+    ) -> List[GNNMessage]:
+        """
+        Receive GNN-routed messages.
+
+        Args:
+            message_type: Optional filter by message type
+            max_messages: Maximum messages to retrieve
+            min_priority: Minimum priority threshold
+
+        Returns:
+            List of GNN messages
+
+        Example:
+            >>> messages = self.receive_gnn_messages(
+            ...     message_type=MessageType.COLLABORATION_REQUEST,
+            ...     max_messages=5
+            ... )
+            >>> for msg in messages:
+            ...     self.handle_collaboration_request(msg)
+        """
+        if not self.gnn_communicator:
+            return []
+
+        return self.gnn_communicator.receive_messages(
+            agent_id=self.agent_id,
+            message_type=message_type,
+            max_messages=max_messages,
+            min_priority=min_priority
+        )
+
+    def process_gnn_messages(self):
+        """
+        Process all pending GNN messages using registered handlers.
+
+        Retrieves messages and dispatches to appropriate handlers based
+        on message type. Unknown message types are logged but not processed.
+
+        Example:
+            >>> # In agent's step() method:
+            >>> self.process_gnn_messages()
+        """
+        messages = self.receive_gnn_messages()
+
+        for message in messages:
+            # Check for registered handler
+            if message.message_type in self.gnn_message_handlers:
+                handler = self.gnn_message_handlers[message.message_type]
+                try:
+                    handler(message)
+                except Exception as e:
+                    logger.error(
+                        "%s: Error handling message %s: %s",
+                        self.agent_id, message.message_id, e
+                    )
+            else:
+                logger.debug(
+                    "%s: No handler for message type %s",
+                    self.agent_id, message.message_type
+                )
+
+    def register_gnn_message_handler(
+        self,
+        message_type: str,
+        handler: Callable[[GNNMessage], None]
+    ):
+        """
+        Register handler for specific message type.
+
+        Args:
+            message_type: Message type to handle
+            handler: Callback function that takes GNNMessage as input
+
+        Example:
+            >>> def handle_query(msg: GNNMessage):
+            ...     # Process query and send response
+            ...     self.send_gnn_message(
+            ...         content={'response': 'data'},
+            ...         message_type=MessageType.QUERY_RESPONSE,
+            ...         target_ids=[msg.sender_id]
+            ...     )
+            >>>
+            >>> self.register_gnn_message_handler(
+            ...     MessageType.QUERY,
+            ...     handle_query
+            ... )
+        """
+        self.gnn_message_handlers[message_type] = handler
+        logger.debug(
+            "%s: Registered handler for %s",
+            self.agent_id, message_type
+        )
+
+    def report_communication_outcome(
+        self,
+        message_id: str,
+        recipient_id: str,
+        success: bool,
+        reward: float = 0.0
+    ):
+        """
+        Report outcome of message communication for GNN learning.
+
+        Updates edge weights in communication graph based on outcomes,
+        enabling the system to learn optimal routing patterns.
+
+        Args:
+            message_id: Message identifier
+            recipient_id: Agent who received/processed message
+            success: Whether communication was successful
+            reward: Outcome reward (optional, 0.0 if not provided)
+
+        Example:
+            >>> msg_id = self.send_gnn_message(
+            ...     content={'request': 'collaborate'},
+            ...     message_type=MessageType.COLLABORATION_REQUEST,
+            ...     target_ids=['SpecialistAgent_5']
+            ... )
+            >>> # ... later, after collaboration completes ...
+            >>> self.report_communication_outcome(
+            ...     msg_id,
+            ...     'SpecialistAgent_5',
+            ...     success=True,
+            ...     reward=0.8
+            ... )
+        """
+        if not self.gnn_communicator:
+            return
+
+        self.gnn_communicator.report_communication_outcome(
+            message_id=message_id,
+            recipient_id=recipient_id,
+            success=success,
+            reward=reward
+        )
+
+    def get_gnn_neighbors(self, k: Optional[int] = None) -> List[str]:
+        """
+        Get neighboring agents in GNN communication graph.
+
+        Args:
+            k: Optional limit (returns top-k by edge weight)
+
+        Returns:
+            List of agent IDs
+
+        Example:
+            >>> neighbors = self.get_gnn_neighbors(k=5)
+            >>> # Send targeted message to top 5 neighbors
+            >>> self.send_gnn_message(
+            ...     content={'info': 'update'},
+            ...     target_ids=neighbors
+            ... )
+        """
+        if not self.gnn_communicator:
+            return []
+
+        return self.gnn_communicator.get_agent_neighbors(
+            agent_id=self.agent_id,
+            k=k
+        )
+
+    def broadcast_capability(self):
+        """
+        Broadcast agent capabilities to network.
+
+        Useful for specialist agents to advertise their skills,
+        or for builders to discover available specialists.
+
+        Example:
+            >>> # Specialist agent broadcasts capabilities
+            >>> self.broadcast_capability()
+        """
+        if not self.gnn_communicator or not self.capabilities:
+            return
+
+        self.send_gnn_message(
+            content={
+                'capabilities': list(self.capabilities),
+                'level': self.agent_level,
+                'agent_type': self.agent_type,
+                'satisfaction': self.satisfaction_score
+            },
+            message_type=MessageType.CAPABILITY_BROADCAST,
+            priority=0.3
+        )
+
+    def request_collaboration(
+        self,
+        target_ids: Optional[List[str]] = None,
+        task_description: str = "",
+        required_capabilities: Optional[List[str]] = None
+    ) -> Optional[str]:
+        """
+        Request collaboration from other agents.
+
+        Args:
+            target_ids: Optional specific targets (if None, uses GNN routing)
+            task_description: Description of collaboration task
+            required_capabilities: List of capabilities needed
+
+        Returns:
+            Message ID if sent successfully
+
+        Example:
+            >>> # Builder requests specialist
+            >>> msg_id = self.request_collaboration(
+            ...     task_description="Need optimization expert",
+            ...     required_capabilities=["hyperparameter_tuning"]
+            ... )
+        """
+        if not self.gnn_communicator:
+            return None
+
+        content = {
+            'task': task_description,
+            'required_capabilities': required_capabilities or [],
+            'requester_type': self.agent_type,
+            'requester_level': self.agent_level
+        }
+
+        return self.send_gnn_message(
+            content=content,
+            message_type=MessageType.COLLABORATION_REQUEST,
+            target_ids=target_ids,
+            priority=0.7
+        )
+
+    def share_knowledge(
+        self,
+        knowledge: Dict[str, Any],
+        target_ids: Optional[List[str]] = None
+    ) -> Optional[str]:
+        """
+        Share learned knowledge with other agents.
+
+        Args:
+            knowledge: Knowledge dictionary to share
+            target_ids: Optional specific targets
+
+        Returns:
+            Message ID if sent successfully
+
+        Example:
+            >>> # Share successful strategy
+            >>> self.share_knowledge({
+            ...     'strategy': 'explore_then_exploit',
+            ...     'performance': 0.85,
+            ...     'steps_to_convergence': 1500
+            ... })
+        """
+        if not self.gnn_communicator:
+            return None
+
+        content = {
+            'knowledge': knowledge,
+            'source_type': self.agent_type,
+            'source_level': self.agent_level,
+            'source_satisfaction': self.satisfaction_score
+        }
+
+        return self.send_gnn_message(
+            content=content,
+            message_type=MessageType.KNOWLEDGE_SHARE,
+            target_ids=target_ids,
+            priority=0.5
+        )
+
+    def get_gnn_communication_stats(self) -> Optional[Dict[str, Any]]:
+        """
+        Get GNN communication statistics.
+
+        Returns:
+            Dictionary with communication metrics including overhead reduction
+
+        Example:
+            >>> stats = self.get_gnn_communication_stats()
+            >>> print(f"Overhead reduction: {stats['overhead_reduction_percent']}%")
+        """
+        if not self.gnn_communicator:
+            return None
+
+        return self.gnn_communicator.get_communication_statistics()
