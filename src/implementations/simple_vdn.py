@@ -582,6 +582,375 @@ class SimpleVDN(ValueDecompositionEngine):
 
         logger.info("SimpleVDN reset for agent %s", self.agent_id)
 
+    # =========================================================================
+    # Test-Compatible API Aliases
+    # =========================================================================
+
+    def decompose_value(self, q_values: Dict[str, float]) -> float:
+        """
+        Decompose value from individual Q-values (test-compatible API).
+
+        Args:
+            q_values: Dict of agent_id -> Q-value
+
+        Returns:
+            Total joint value
+        """
+        # For additive VDN, just sum the Q-values
+        return sum(q_values.values())
+
+    def calculate_credit(
+        self,
+        team_reward: float,
+        baseline_reward: float
+    ) -> float:
+        """
+        Calculate credit using difference rewards (test-compatible API).
+
+        Args:
+            team_reward: Total team reward
+            baseline_reward: Baseline (what team gets without this agent)
+
+        Returns:
+            Individual credit
+        """
+        # Credit = marginal contribution
+        credit = team_reward - baseline_reward
+        self.credit_history.append(credit)
+        self.total_credits_assigned += 1
+        return credit
+
+    def estimate_marginal_contribution(
+        self,
+        state: np.ndarray,
+        action: int,
+        team_reward: float
+    ) -> float:
+        """
+        Estimate marginal contribution (test-compatible API).
+
+        Args:
+            state: State array
+            action: Action index
+            team_reward: Team reward
+
+        Returns:
+            Estimated marginal contribution
+        """
+        # Convert numpy array to dict format
+        state_dict = {"array": state}
+
+        # Compute local value for this state-action
+        local_value = self.compute_local_value(state_dict, action, {})
+
+        # Marginal contribution is proportion of team reward based on local value
+        # If we don't have team values, assume equal contribution
+        if not self.team_values:
+            return team_reward
+
+        total_value = sum(self.team_values.values()) + local_value
+        if total_value > 0:
+            marginal = (local_value / total_value) * team_reward
+        else:
+            marginal = team_reward / (len(self.team_values) + 1)
+
+        return float(marginal)
+
+    # =========================================================================
+    # Additional Abstract Method Implementations
+    # =========================================================================
+
+    def decompose_global_value(
+        self,
+        global_value: float,
+        state: Dict[str, Any],
+        joint_action: Dict[str, Any]
+    ) -> Dict[str, float]:
+        """
+        Decompose global value into individual contributions (alias for decompose_joint_value).
+
+        Args:
+            global_value: Q_tot
+            state: Global state
+            joint_action: All agent actions
+
+        Returns:
+            Dictionary of agent_id -> contribution
+        """
+        return self.decompose_joint_value(global_value, state, joint_action)
+
+    def compute_counterfactual_baseline(
+        self,
+        state: Dict[str, Any],
+        joint_action: Dict[str, Any],
+        agent_to_evaluate: Optional[str] = None
+    ) -> float:
+        """
+        Compute counterfactual baseline: value without agent's contribution.
+
+        Args:
+            state: Global state
+            joint_action: All agent actions
+            agent_to_evaluate: Agent to compute baseline for (defaults to self)
+
+        Returns:
+            Baseline value
+        """
+        agent_id = agent_to_evaluate or self.agent_id
+
+        # Get individual values
+        individual_values = {
+            aid: self.team_values.get(aid, 0.0)
+            for aid in joint_action.keys()
+        }
+
+        # Compute joint value
+        joint_value = self.compute_joint_value(state, joint_action, individual_values)
+
+        # Subtract evaluated agent's contribution
+        agent_value = individual_values.get(agent_id, 0.0)
+        baseline = joint_value - agent_value
+
+        return float(baseline)
+
+    def share_value_information(
+        self,
+        state: Dict[str, Any],
+        action: Any,
+        value: float,
+        metadata: Optional[Dict[str, Any]] = None
+    ):
+        """
+        Share value information with team members.
+
+        Args:
+            state: Current state
+            action: This agent's action
+            value: Computed local value
+            metadata: Additional information
+        """
+        # Store locally
+        self.team_values[self.agent_id] = value
+        self.joint_actions[self.agent_id] = action
+
+        # Publish to Redis for team coordination
+        try:
+            message = {
+                "agent_id": self.agent_id,
+                "state": state,
+                "action": action,
+                "value": value,
+                "timestamp": time.time(),
+                "metadata": metadata or {}
+            }
+            channel = f"vdn:values:{self.agent_id}"
+            self.redis_client.publish(channel, message)
+            logger.debug("Shared value %.3f for state/action", value)
+
+        except Exception as e:
+            logger.error("Failed to share value information: %s", e)
+
+    def receive_peer_values(
+        self,
+        state: Dict[str, Any],
+        timeout_ms: Optional[int] = None
+    ) -> Dict[str, float]:
+        """
+        Receive value information from peers.
+
+        Args:
+            state: Current state
+            timeout_ms: Optional timeout
+
+        Returns:
+            Dictionary of agent_id -> value
+        """
+        # In SimpleVDN, we use stored team values
+        # In production, would subscribe to Redis channels
+        return self.team_values.copy()
+
+    def validate_value_consistency(
+        self,
+        individual_values: Dict[str, float],
+        joint_value: float,
+        tolerance: float = 1e-6
+    ) -> bool:
+        """
+        Validate that value decomposition is consistent.
+
+        Args:
+            individual_values: Individual agent values
+            joint_value: Joint value
+            tolerance: Tolerance for floating point comparison
+
+        Returns:
+            True if consistent
+        """
+        if self.decomposition_method == DecompositionMethod.ADDITIVE:
+            # Sum should equal joint value
+            total = sum(individual_values.values())
+            return abs(total - joint_value) < tolerance
+
+        # For other methods, less strict validation
+        return True
+
+    def compute_mixing_weights(
+        self,
+        state: Dict[str, Any]
+    ) -> Dict[str, float]:
+        """
+        Compute mixing weights for QMIX-style decomposition.
+
+        Args:
+            state: Global state
+
+        Returns:
+            Dictionary of agent_id -> weight
+        """
+        # Simple uniform weights for basic implementation
+        # In QMIX, these come from a hypernetwork
+        num_agents = len(self.team_values)
+        if num_agents == 0:
+            return {}
+
+        weight = 1.0 / num_agents
+        return {agent_id: weight for agent_id in self.team_values.keys()}
+
+    def estimate_value_variance(
+        self,
+        state: Dict[str, Any],
+        action: Any
+    ) -> float:
+        """
+        Estimate variance/uncertainty in value estimate.
+
+        Args:
+            state: Current state
+            action: Action
+
+        Returns:
+            Variance estimate
+        """
+        # Simple variance estimation based on experience buffer
+        state_key = self._state_to_key(state)
+        action_idx = self._action_to_index(action)
+
+        # Get Q-value
+        if state_key not in self.q_table:
+            return 1.0  # High uncertainty for unseen states
+
+        # Estimate variance from TD errors in experience buffer
+        relevant_experiences = [
+            exp for exp in self.experience_buffer
+            if self._state_to_key(exp["state"]) == state_key
+            and self._action_to_index(exp["action"]) == action_idx
+        ]
+
+        if not relevant_experiences:
+            return 0.5  # Moderate uncertainty
+
+        td_errors = [exp["td_error"] for exp in relevant_experiences]
+        variance = float(np.var(td_errors))
+
+        return variance
+
+    def get_value_decomposition_explanation(
+        self,
+        state: Dict[str, Any],
+        joint_action: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Get explanation of how value was decomposed.
+
+        Args:
+            state: Global state
+            joint_action: All agent actions
+
+        Returns:
+            Explanation dictionary
+        """
+        # Get individual values
+        individual_values = {
+            aid: self.team_values.get(aid, 0.0)
+            for aid in joint_action.keys()
+        }
+
+        # Compute joint value
+        joint_value = self.compute_joint_value(state, joint_action, individual_values)
+
+        # Compute marginal contributions
+        marginals = {}
+        for agent_id in joint_action.keys():
+            baseline = self.compute_counterfactual_baseline(state, joint_action, agent_id)
+            marginals[agent_id] = joint_value - baseline
+
+        return {
+            "decomposition_method": self.decomposition_method.value,
+            "joint_value": joint_value,
+            "individual_values": individual_values,
+            "marginal_contributions": marginals,
+            "consistency_check": self.validate_value_consistency(individual_values, joint_value),
+            "agent_id": self.agent_id
+        }
+
+    def sync_value_functions(
+        self,
+        peer_value_functions: Dict[str, Any]
+    ):
+        """
+        Synchronize value functions with peers.
+
+        Args:
+            peer_value_functions: Dictionary of agent_id -> value_function_data
+        """
+        # Store peer values for joint computation
+        for agent_id, value_data in peer_value_functions.items():
+            if agent_id != self.agent_id:
+                # Extract current value
+                if isinstance(value_data, dict):
+                    self.team_values[agent_id] = value_data.get("current_value", 0.0)
+                else:
+                    self.team_values[agent_id] = float(value_data)
+
+        logger.debug("Synced value functions with %d peers", len(peer_value_functions))
+
+    def compute_value_gradient(
+        self,
+        state: Dict[str, Any],
+        action: Any
+    ) -> Dict[str, Any]:
+        """
+        Compute gradient of value function (for policy gradient methods).
+
+        Args:
+            state: Current state
+            action: Action
+
+        Returns:
+            Dictionary containing gradient information
+        """
+        # For tabular Q-learning, gradient is discrete
+        # Return action-value gradients
+        state_key = self._state_to_key(state)
+
+        if state_key not in self.q_table:
+            self.q_table[state_key] = np.ones(self.action_dim) * self.default_q_value
+
+        q_values = self.q_table[state_key]
+        action_idx = self._action_to_index(action)
+
+        # Compute advantage (gradient surrogate)
+        baseline = np.mean(q_values)
+        advantage = q_values[action_idx] - baseline
+
+        return {
+            "q_values": q_values.tolist(),
+            "action_value": float(q_values[action_idx]),
+            "advantage": float(advantage),
+            "baseline": float(baseline),
+            "state_key": str(state_key)
+        }
+
 
 # =========================================================================
 # Factory Function

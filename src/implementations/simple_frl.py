@@ -112,6 +112,18 @@ class SimpleFRL(FederatedLearningEngine):
     # Policy Sharing (Outbound)
     # =========================================================================
 
+    def share_policy(
+        self,
+        policy_state: Dict[str, Any],
+        performance_score: Optional[float] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> int:
+        """Alias for share_policy_update with performance_score support."""
+        metadata = metadata or {}
+        if performance_score is not None:
+            metadata["performance"] = performance_score
+        return self.share_policy_update(policy_state, metadata)
+
     def share_policy_update(
         self,
         policy_state: Dict[str, Any],
@@ -207,6 +219,26 @@ class SimpleFRL(FederatedLearningEngine):
             return peers_list[:self.max_peers // 2]
 
         return []
+
+    def select_peers_for_sharing(
+        self,
+        num_peers: Optional[int] = None
+    ) -> List[str]:
+        """
+        Select which peers to share policy updates with (abstract method implementation).
+
+        Args:
+            num_peers: Optional limit on number of peers to select
+
+        Returns:
+            List of peer IDs to share with
+        """
+        selected = self._select_peers_for_sharing()
+
+        if num_peers is not None and len(selected) > num_peers:
+            selected = selected[:num_peers]
+
+        return selected
 
     # =========================================================================
     # Policy Aggregation (Inbound)
@@ -477,6 +509,27 @@ class SimpleFRL(FederatedLearningEngine):
         logger.debug("Updated trust for %s: %.3f -> %.3f",
                     peer_id, current_trust, new_trust)
 
+    def update_peer_trust(
+        self,
+        peer_id: str,
+        update_quality: float,
+        performance_delta: float
+    ):
+        """
+        Update trust score for a peer based on update quality (abstract method implementation).
+
+        Args:
+            peer_id: ID of the peer to update trust for
+            update_quality: Quality metric for the received update (0.0 to 1.0)
+            performance_delta: Change in performance after applying update
+        """
+        # Combine update quality and performance delta into feedback
+        # Positive performance delta increases trust, negative decreases it
+        feedback = update_quality * 0.5 + (0.5 if performance_delta > 0 else 0.0)
+        feedback = np.clip(feedback, 0.0, 1.0)
+
+        self.update_trust_score(peer_id, feedback)
+
     # =========================================================================
     # Peer Management
     # =========================================================================
@@ -569,6 +622,169 @@ class SimpleFRL(FederatedLearningEngine):
     def get_connected_peers(self) -> List[str]:
         """Get list of currently connected peers."""
         return list(self.connected_peers)
+
+    @property
+    def peers(self) -> Set[str]:
+        """Alias for connected_peers (for test compatibility)."""
+        return self.connected_peers
+
+    def aggregate_policies(
+        self,
+        policies: Dict[str, Dict[str, Any]],
+        trust_scores: Dict[str, float]
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Aggregate policies from multiple peers (test-compatible API).
+
+        Args:
+            policies: Dict of agent_id -> policy_state
+            trust_scores: Dict of agent_id -> trust_score
+
+        Returns:
+            Aggregated policy or None if no valid policies
+        """
+        if not policies:
+            return None
+
+        # Filter by trust threshold
+        valid_policies = []
+        for agent_id, policy in policies.items():
+            trust = trust_scores.get(agent_id, 0.5)
+            if trust >= self.trust_threshold:
+                # Convert to update format
+                update = {
+                    "agent_id": agent_id,
+                    "policy_state": policy,
+                    "metadata": {"performance": trust}
+                }
+                valid_policies.append(update)
+
+        if not valid_policies:
+            return None
+
+        # Use a dummy local policy (all zeros or first policy)
+        if valid_policies:
+            local_policy = valid_policies[0]["policy_state"].copy()
+        else:
+            return None
+
+        # Aggregate
+        return self.aggregate_policy_updates(local_policy, valid_policies)
+
+    # =========================================================================
+    # Additional Abstract Method Implementations
+    # =========================================================================
+
+    def receive_policy_updates(
+        self,
+        timeout_ms: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Receive policy updates from peers (abstract method implementation).
+
+        Args:
+            timeout_ms: Optional timeout in milliseconds for blocking receive
+
+        Returns:
+            List of policy updates from peers
+        """
+        # In SimpleFRL, we use push-based updates via Redis pub/sub
+        # This method returns buffered updates
+        updates = self.update_buffer.copy()
+        self.update_buffer.clear()
+        return updates
+
+    def compute_update_weight(self, peer_id: str) -> float:
+        """
+        Compute the weight/importance for a peer's update during aggregation.
+
+        Args:
+            peer_id: ID of the peer
+
+        Returns:
+            Weight value (typically 0.0 to 1.0)
+        """
+        # Weight based on trust and performance
+        trust = self.trust_scores.get(peer_id, 0.5)
+
+        # Get average performance from history
+        history = self.peer_history.get(peer_id, [])
+        performance = np.mean(history) if history else 0.5
+
+        # Combine trust and performance
+        weight = 0.6 * trust + 0.4 * performance
+
+        return float(np.clip(weight, 0.0, 1.0))
+
+    def get_policy_divergence(
+        self,
+        policy_a: Dict[str, Any],
+        policy_b: Dict[str, Any]
+    ) -> float:
+        """
+        Measure divergence between two policies.
+
+        Args:
+            policy_a: First policy to compare
+            policy_b: Second policy to compare
+
+        Returns:
+            Divergence metric (higher = more different)
+        """
+        # Compute L2 norm of differences
+        divergence = 0.0
+        compared_keys = 0
+
+        for key in policy_a.keys():
+            if key in policy_b:
+                val_a = policy_a[key]
+                val_b = policy_b[key]
+
+                if isinstance(val_a, (int, float)) and isinstance(val_b, (int, float)):
+                    divergence += (val_a - val_b) ** 2
+                    compared_keys += 1
+                elif isinstance(val_a, np.ndarray) and isinstance(val_b, np.ndarray):
+                    if val_a.shape == val_b.shape:
+                        divergence += np.sum((val_a - val_b) ** 2)
+                        compared_keys += 1
+
+        if compared_keys == 0:
+            return 0.0
+
+        return float(np.sqrt(divergence / compared_keys))
+
+    def prune_policy_updates(
+        self,
+        updates: List[Dict[str, Any]],
+        max_updates: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Prune/filter policy updates to keep only the most valuable ones.
+
+        Args:
+            updates: List of policy updates
+            max_updates: Maximum number of updates to keep
+
+        Returns:
+            Filtered list of most valuable updates
+        """
+        if len(updates) <= max_updates:
+            return updates
+
+        # Score each update based on trust and performance
+        scored_updates = []
+        for update in updates:
+            peer_id = update.get("agent_id")
+            if peer_id:
+                weight = self.compute_update_weight(peer_id)
+                scored_updates.append((weight, update))
+            else:
+                scored_updates.append((0.5, update))
+
+        # Sort by score (descending) and take top max_updates
+        scored_updates.sort(key=lambda x: x[0], reverse=True)
+
+        return [update for _, update in scored_updates[:max_updates]]
 
     # =========================================================================
     # Statistics and Management
