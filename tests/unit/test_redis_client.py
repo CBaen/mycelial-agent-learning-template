@@ -77,7 +77,9 @@ class TestRedisClientKeyValue:
 
         redis_client.client.set.assert_called_once_with(
             "test_key",
-            "test_value"
+            "test_value",
+            ex=None,
+            px=None
         )
 
     def test_set_key_value_with_dict(self, redis_client):
@@ -87,7 +89,9 @@ class TestRedisClientKeyValue:
 
         redis_client.client.set.assert_called_once_with(
             "test_key",
-            json.dumps(test_dict)
+            json.dumps(test_dict),
+            ex=None,
+            px=None
         )
 
     def test_get_key_value_simple(self, redis_client):
@@ -182,11 +186,8 @@ class TestRedisClientPubSub:
         channels = ["channel1", "channel2", "channel3"]
         redis_client.subscribe(channels)
 
-        for channel in channels:
-            assert any(
-                call[0][0] == channel
-                for call in redis_client.pubsub.subscribe.call_args_list
-            )
+        # Should be called once with all channels unpacked
+        redis_client.pubsub.subscribe.assert_called_once_with(*channels)
 
 
 class TestRedisClientStreams:
@@ -209,11 +210,14 @@ class TestRedisClientStreams:
         test_data = {"field1": "value1", "field2": "value2"}
         result = redis_client.write_to_stream("test_stream", test_data)
 
-        assert result == '1234567890-0'
-        redis_client.client.xadd.assert_called_once_with(
-            "test_stream",
-            test_data
-        )
+        assert result == b'1234567890-0'
+        # Check that xadd was called with stream name and includes timestamp
+        call_args = redis_client.client.xadd.call_args
+        assert call_args[0][0] == "test_stream"
+        assert "field1" in call_args[0][1]
+        assert "field2" in call_args[0][1]
+        assert "timestamp" in call_args[0][1]  # Auto-added timestamp
+        assert call_args[1] == {"maxlen": None, "approximate": True}
 
     def test_read_from_stream_basic(self, redis_client):
         """Test reading from a stream."""
@@ -228,8 +232,8 @@ class TestRedisClientStreams:
         result = redis_client.read_from_stream("test_stream")
 
         assert len(result) == 2
-        assert result[0][0] == '1-0'
-        assert result[1][0] == '1-1'
+        assert result[0][0] == b'1-0'
+        assert result[1][0] == b'1-1'
 
     def test_read_from_stream_with_count(self, redis_client):
         """Test reading with count limit."""

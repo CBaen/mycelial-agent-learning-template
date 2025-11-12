@@ -27,9 +27,7 @@ class TestSpecialistAgentInit:
 
     def test_init_with_defaults(self, mock_redis_client, mock_mesa_model):
         """Test initialization with default parameters."""
-        agent = SpecialistAgent(
-            unique_id=1,
-            model=mock_mesa_model,
+        agent = SpecialistAgent(model=mock_mesa_model,
             redis_client=mock_redis_client,
             data_channel="test_data"
         )
@@ -42,9 +40,7 @@ class TestSpecialistAgentInit:
 
     def test_init_with_custom_team_and_specialization(self, mock_redis_client, mock_mesa_model):
         """Test initialization with custom team and specialization."""
-        agent = SpecialistAgent(
-            unique_id=2,
-            model=mock_mesa_model,
+        agent = SpecialistAgent(model=mock_mesa_model,
             redis_client=mock_redis_client,
             data_channel="data",
             team_id="team_alpha",
@@ -59,9 +55,7 @@ class TestSpecialistAgentInit:
         mock_vector_db = MagicMock()
         mock_mesa_model.vector_db = mock_vector_db
 
-        agent = SpecialistAgent(
-            unique_id=3,
-            model=mock_mesa_model,
+        agent = SpecialistAgent(model=mock_mesa_model,
             redis_client=mock_redis_client,
             data_channel="data"
         )
@@ -73,9 +67,7 @@ class TestSpecialistAgentInit:
         mock_frl_engine = MagicMock()
         mock_mesa_model.frl_engine = mock_frl_engine
 
-        agent = SpecialistAgent(
-            unique_id=4,
-            model=mock_mesa_model,
+        agent = SpecialistAgent(model=mock_mesa_model,
             redis_client=mock_redis_client,
             data_channel="data"
         )
@@ -87,9 +79,7 @@ class TestSpecialistAgentInit:
         mock_vdn_engine = MagicMock()
         mock_mesa_model.vdn_engine = mock_vdn_engine
 
-        agent = SpecialistAgent(
-            unique_id=5,
-            model=mock_mesa_model,
+        agent = SpecialistAgent(model=mock_mesa_model,
             redis_client=mock_redis_client,
             data_channel="data"
         )
@@ -98,9 +88,7 @@ class TestSpecialistAgentInit:
 
     def test_init_subscribes_to_data_channel(self, mock_redis_client, mock_mesa_model):
         """Test that agent subscribes to data channel."""
-        agent = SpecialistAgent(
-            unique_id=6,
-            model=mock_mesa_model,
+        agent = SpecialistAgent(model=mock_mesa_model,
             redis_client=mock_redis_client,
             data_channel="my_data_channel"
         )
@@ -109,9 +97,7 @@ class TestSpecialistAgentInit:
 
     def test_init_learning_configuration_defaults(self, mock_redis_client, mock_mesa_model):
         """Test default learning configuration."""
-        agent = SpecialistAgent(
-            unique_id=7,
-            model=mock_mesa_model,
+        agent = SpecialistAgent(model=mock_mesa_model,
             redis_client=mock_redis_client,
             data_channel="data"
         )
@@ -131,9 +117,7 @@ class TestSpecialistAgentInit:
             "buffer_size": 500
         }
 
-        agent = SpecialistAgent(
-            unique_id=8,
-            model=mock_mesa_model,
+        agent = SpecialistAgent(model=mock_mesa_model,
             redis_client=mock_redis_client,
             data_channel="data",
             agent_config=config
@@ -147,9 +131,7 @@ class TestSpecialistAgentInit:
 
     def test_init_policy_type_simple(self, mock_redis_client, mock_mesa_model):
         """Test initialization with simple policy type."""
-        agent = SpecialistAgent(
-            unique_id=9,
-            model=mock_mesa_model,
+        agent = SpecialistAgent(model=mock_mesa_model,
             redis_client=mock_redis_client,
             data_channel="data"
         )
@@ -160,9 +142,7 @@ class TestSpecialistAgentInit:
 
     def test_init_experience_buffer(self, mock_redis_client, mock_mesa_model):
         """Test experience buffer initialization."""
-        agent = SpecialistAgent(
-            unique_id=10,
-            model=mock_mesa_model,
+        agent = SpecialistAgent(model=mock_mesa_model,
             redis_client=mock_redis_client,
             data_channel="data"
         )
@@ -172,9 +152,7 @@ class TestSpecialistAgentInit:
 
     def test_init_metrics_initialization(self, mock_redis_client, mock_mesa_model):
         """Test task metrics initialization."""
-        agent = SpecialistAgent(
-            unique_id=11,
-            model=mock_mesa_model,
+        agent = SpecialistAgent(model=mock_mesa_model,
             redis_client=mock_redis_client,
             data_channel="data"
         )
@@ -192,9 +170,7 @@ class TestSpecialistAgentPolicyInitialization:
     @pytest.fixture
     def agent(self, mock_redis_client, mock_mesa_model):
         """Create test agent."""
-        return SpecialistAgent(
-            unique_id=1,
-            model=mock_mesa_model,
+        return SpecialistAgent(model=mock_mesa_model,
             redis_client=mock_redis_client,
             data_channel="data"
         )
@@ -210,9 +186,7 @@ class TestSpecialistAgentPolicyInitialization:
     def test_initialize_policy_custom_type(self, mock_redis_client, mock_mesa_model):
         """Test initialization with custom policy type."""
         config = {"policy_type": "neural_network"}
-        agent = SpecialistAgent(
-            unique_id=2,
-            model=mock_mesa_model,
+        agent = SpecialistAgent(model=mock_mesa_model,
             redis_client=mock_redis_client,
             data_channel="data",
             agent_config=config
@@ -228,9 +202,7 @@ class TestSpecialistAgentActionSelection:
     @pytest.fixture
     def agent(self, mock_redis_client, mock_mesa_model):
         """Create test agent."""
-        return SpecialistAgent(
-            unique_id=1,
-            model=mock_mesa_model,
+        return SpecialistAgent(model=mock_mesa_model,
             redis_client=mock_redis_client,
             data_channel="data"
         )
@@ -293,9 +265,7 @@ class TestSpecialistAgentExperienceBuffer:
     @pytest.fixture
     def agent(self, mock_redis_client, mock_mesa_model):
         """Create test agent."""
-        return SpecialistAgent(
-            unique_id=1,
-            model=mock_mesa_model,
+        return SpecialistAgent(model=mock_mesa_model,
             redis_client=mock_redis_client,
             data_channel="data",
             agent_config={"buffer_size": 10}
@@ -323,8 +293,8 @@ class TestSpecialistAgentExperienceBuffer:
 
         # Should only keep last 10
         assert len(agent.experience_buffer) == 10
-        # Oldest should be dropped
-        assert agent.experience_buffer[0]["step"] == 5
+        # Oldest should be dropped (first 5 removed, so oldest is step 5)
+        assert agent.experience_buffer[0]["state"]["step"] == 5
 
 
 class TestSpecialistAgentLearning:
@@ -333,9 +303,7 @@ class TestSpecialistAgentLearning:
     @pytest.fixture
     def agent(self, mock_redis_client, mock_mesa_model):
         """Create test agent."""
-        return SpecialistAgent(
-            unique_id=1,
-            model=mock_mesa_model,
+        return SpecialistAgent(model=mock_mesa_model,
             redis_client=mock_redis_client,
             data_channel="data"
         )
@@ -377,9 +345,7 @@ class TestSpecialistAgentPolicySharing:
         """Create test agent."""
         mock_mesa_model.vector_db = MagicMock()
         mock_mesa_model.frl_engine = MagicMock()
-        return SpecialistAgent(
-            unique_id=1,
-            model=mock_mesa_model,
+        return SpecialistAgent(model=mock_mesa_model,
             redis_client=mock_redis_client,
             data_channel="data"
         )
@@ -517,9 +483,7 @@ class TestSpecialistAgentPeerManagement:
         """Create test agent."""
         mock_mesa_model.frl_engine = MagicMock()
         mock_mesa_model.vdn_engine = MagicMock()
-        return SpecialistAgent(
-            unique_id=1,
-            model=mock_mesa_model,
+        return SpecialistAgent(model=mock_mesa_model,
             redis_client=mock_redis_client,
             data_channel="data"
         )
@@ -564,9 +528,7 @@ class TestSpecialistAgentMetrics:
     @pytest.fixture
     def agent(self, mock_redis_client, mock_mesa_model):
         """Create test agent."""
-        return SpecialistAgent(
-            unique_id=1,
-            model=mock_mesa_model,
+        return SpecialistAgent(model=mock_mesa_model,
             redis_client=mock_redis_client,
             data_channel="data"
         )
@@ -678,9 +640,7 @@ class TestSpecialistAgentRedisState:
     @pytest.fixture
     def agent(self, mock_redis_client, mock_mesa_model):
         """Create test agent."""
-        return SpecialistAgent(
-            unique_id=1,
-            model=mock_mesa_model,
+        return SpecialistAgent(model=mock_mesa_model,
             redis_client=mock_redis_client,
             data_channel="data"
         )
@@ -719,9 +679,7 @@ class TestSpecialistAgentReset:
     @pytest.fixture
     def agent(self, mock_redis_client, mock_mesa_model):
         """Create test agent."""
-        return SpecialistAgent(
-            unique_id=1,
-            model=mock_mesa_model,
+        return SpecialistAgent(model=mock_mesa_model,
             redis_client=mock_redis_client,
             data_channel="data",
             agent_config={"exploration_rate": 0.2}
@@ -776,9 +734,7 @@ class TestSpecialistAgentStep:
     @pytest.fixture
     def agent(self, mock_redis_client, mock_mesa_model):
         """Create test agent."""
-        return SpecialistAgent(
-            unique_id=1,
-            model=mock_mesa_model,
+        return SpecialistAgent(model=mock_mesa_model,
             redis_client=mock_redis_client,
             data_channel="data"
         )
@@ -795,6 +751,10 @@ class TestSpecialistAgentStep:
     def test_step_with_data(self, agent):
         """Test step with received data."""
         task_data = {"task": "classify", "data": [1, 2, 3]}
+
+        # Mock VDN engine if present
+        if agent.vdn_engine:
+            agent.vdn_engine.assign_credit = MagicMock(return_value=1.5)
 
         with patch.object(agent, '_receive_data_from_channel', return_value=task_data):
             with patch.object(agent, '_execute_action', return_value=1.5):

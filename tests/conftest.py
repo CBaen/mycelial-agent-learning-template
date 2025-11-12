@@ -35,9 +35,10 @@ def mock_redis_client():
     # Mock storage
     mock_client._storage = {}
 
-    # Mock methods
+    # Mock methods with side effects for storage
     def mock_set(key, value):
         mock_client._storage[key] = value
+        return True
 
     def mock_get(key):
         return mock_client._storage.get(key)
@@ -46,12 +47,13 @@ def mock_redis_client():
         return key in mock_client._storage
 
     def mock_delete(key):
-        return mock_client._storage.pop(key, None)
+        return mock_client._storage.pop(key, None) is not None
 
-    mock_client.set_key_value = mock_set
-    mock_client.get_key_value = mock_get
-    mock_client.client.exists = mock_exists
-    mock_client.client.delete = mock_delete
+    # Use MagicMock with side_effect to allow both functionality and assertions
+    mock_client.set_key_value = MagicMock(side_effect=mock_set)
+    mock_client.get_key_value = MagicMock(side_effect=mock_get)
+    mock_client.client.exists = MagicMock(side_effect=mock_exists)
+    mock_client.client.delete = MagicMock(side_effect=mock_delete)
 
     # Stream methods
     mock_client.write_to_stream = MagicMock(return_value="1-0")
@@ -166,13 +168,30 @@ def sql_logger(temp_sqlite_db):
     logger.stop(timeout=2.0)
 
 
+@pytest.fixture
+def mock_sql_logger():
+    """Mock SQLite logger for testing."""
+    from unittest.mock import MagicMock
+
+    mock = MagicMock()
+    mock.log_agent_event = MagicMock()
+    mock.log_pattern_detected = MagicMock()
+    mock.log_performance_metric = MagicMock()
+    mock.log_system_event = MagicMock()
+    mock.log_risk_event = MagicMock()
+    mock.flush = MagicMock()
+    mock.stop = MagicMock()
+
+    return mock
+
+
 # =============================================================================
 # Model Fixtures
 # =============================================================================
 
 @pytest.fixture
 def mock_mesa_model():
-    """Mock Mesa model for agent testing."""
+    """Mock Mesa model for agent testing (Mesa 3.x compatible)."""
     from unittest.mock import MagicMock
 
     model = MagicMock()
@@ -183,10 +202,25 @@ def mock_mesa_model():
     model.hibernated_agents = {}
     model.total_agents_created = 0
 
+    # Mesa 3.x auto-assigns unique_id via next_id()
+    model._next_id = 0
+    def get_next_id():
+        model._next_id += 1
+        return model._next_id
+    model.next_id = MagicMock(side_effect=get_next_id)
+
     # Mock methods
     model.add_agent = MagicMock()
     model.remove_agent = MagicMock()
     model.get_agent_by_id = MagicMock(return_value=None)
+
+    # Mock learning components (FRL, VDN, Vector DB)
+    # These are accessed by agents via model.frl_engine, model.vdn_engine, etc.
+    model.frl_engine = MagicMock()
+    model.frl_engine.share_policy_update = MagicMock(return_value=0)
+    model.vdn_engine = MagicMock()
+    model.vdn_engine.assign_credit = MagicMock(return_value=0.0)
+    model.vector_db = MagicMock()
 
     return model
 
@@ -267,6 +301,29 @@ def sample_stream_data():
         ("1-1", {"data": "value2", "timestamp": "2024-01-02"}),
         ("1-2", {"data": "value3", "timestamp": "2024-01-03"})
     ]
+
+
+# =============================================================================
+# HAVEN and Builder Fixtures
+# =============================================================================
+
+@pytest.fixture
+def mock_haven_coordinator():
+    """Mock HAVEN risk coordinator."""
+    from unittest.mock import MagicMock
+
+    mock = MagicMock()
+    mock.register_agent = MagicMock()
+    mock.unregister_agent = MagicMock()
+    mock.assess_agent_risk = MagicMock()
+    mock.assess_system_risk = MagicMock(return_value=0.0)
+    mock.recommend_intervention = MagicMock()
+    mock.execute_intervention = MagicMock(return_value=True)
+    mock.detect_policy_contagion = MagicMock()
+    mock.identify_contagion_source = MagicMock(return_value=[])
+    mock.get_system_health_report = MagicMock(return_value={})
+    mock.export_risk_analytics = MagicMock(return_value={})
+    return mock
 
 
 # =============================================================================

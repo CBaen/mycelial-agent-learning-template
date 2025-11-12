@@ -34,9 +34,7 @@ class TestBuilderAgentInit:
 
     def test_init_with_defaults(self, mock_redis_client, mock_mesa_model, mock_vector_db, mock_sql_logger):
         """Test initialization with default parameters."""
-        agent = BuilderAgent(
-            unique_id=1,
-            model=mock_mesa_model,
+        agent = BuilderAgent(model=mock_mesa_model,
             redis_client=mock_redis_client,
             vector_db=mock_vector_db,
             sql_logger=mock_sql_logger
@@ -48,9 +46,7 @@ class TestBuilderAgentInit:
 
     def test_init_with_custom_team(self, mock_redis_client, mock_mesa_model, mock_vector_db, mock_sql_logger):
         """Test initialization with custom team."""
-        agent = BuilderAgent(
-            unique_id=2,
-            model=mock_mesa_model,
+        agent = BuilderAgent(model=mock_mesa_model,
             redis_client=mock_redis_client,
             vector_db=mock_vector_db,
             sql_logger=mock_sql_logger,
@@ -68,9 +64,7 @@ class TestBuilderAgentInit:
             "min_agents": 5
         }
 
-        agent = BuilderAgent(
-            unique_id=3,
-            model=mock_mesa_model,
+        agent = BuilderAgent(model=mock_mesa_model,
             redis_client=mock_redis_client,
             vector_db=mock_vector_db,
             sql_logger=mock_sql_logger,
@@ -84,9 +78,7 @@ class TestBuilderAgentInit:
 
     def test_init_metrics(self, mock_redis_client, mock_mesa_model, mock_vector_db, mock_sql_logger):
         """Test initialization of builder metrics."""
-        agent = BuilderAgent(
-            unique_id=4,
-            model=mock_mesa_model,
+        agent = BuilderAgent(model=mock_mesa_model,
             redis_client=mock_redis_client,
             vector_db=mock_vector_db,
             sql_logger=mock_sql_logger
@@ -104,9 +96,7 @@ class TestBuilderAgentSpawning:
     @pytest.fixture
     def agent(self, mock_redis_client, mock_mesa_model, mock_vector_db, mock_sql_logger):
         """Create test builder agent."""
-        return BuilderAgent(
-            unique_id=1,
-            model=mock_mesa_model,
+        return BuilderAgent(model=mock_mesa_model,
             redis_client=mock_redis_client,
             vector_db=mock_vector_db,
             sql_logger=mock_sql_logger
@@ -174,7 +164,7 @@ class TestBuilderAgentSpawning:
             spawn_trigger=SpawnTrigger.MANUAL
         )
 
-        with pytest.raises(RuntimeError, match="Agent limit reached"):
+        with pytest.raises(RuntimeError, match="Resource constraints violated"):
             agent.spawn_agent(blueprint)
 
         assert agent.failed_spawns == 1
@@ -213,9 +203,7 @@ class TestBuilderAgentHibernation:
     @pytest.fixture
     def agent(self, mock_redis_client, mock_mesa_model, mock_vector_db, mock_sql_logger):
         """Create test builder agent."""
-        return BuilderAgent(
-            unique_id=1,
-            model=mock_mesa_model,
+        return BuilderAgent(model=mock_mesa_model,
             redis_client=mock_redis_client,
             vector_db=mock_vector_db,
             sql_logger=mock_sql_logger
@@ -288,9 +276,7 @@ class TestBuilderAgentRestoration:
     @pytest.fixture
     def agent(self, mock_redis_client, mock_mesa_model, mock_vector_db, mock_sql_logger):
         """Create test builder agent."""
-        return BuilderAgent(
-            unique_id=1,
-            model=mock_mesa_model,
+        return BuilderAgent(model=mock_mesa_model,
             redis_client=mock_redis_client,
             vector_db=mock_vector_db,
             sql_logger=mock_sql_logger
@@ -354,9 +340,7 @@ class TestBuilderAgentTermination:
     @pytest.fixture
     def agent(self, mock_redis_client, mock_mesa_model, mock_vector_db, mock_sql_logger):
         """Create test builder agent."""
-        return BuilderAgent(
-            unique_id=1,
-            model=mock_mesa_model,
+        return BuilderAgent(model=mock_mesa_model,
             redis_client=mock_redis_client,
             vector_db=mock_vector_db,
             sql_logger=mock_sql_logger
@@ -404,9 +388,7 @@ class TestBuilderAgentCloning:
     @pytest.fixture
     def agent(self, mock_redis_client, mock_mesa_model, mock_vector_db, mock_sql_logger):
         """Create test builder agent."""
-        return BuilderAgent(
-            unique_id=1,
-            model=mock_mesa_model,
+        return BuilderAgent(model=mock_mesa_model,
             redis_client=mock_redis_client,
             vector_db=mock_vector_db,
             sql_logger=mock_sql_logger
@@ -468,9 +450,7 @@ class TestBuilderAgentAutoScaling:
     def agent(self, mock_redis_client, mock_mesa_model, mock_vector_db, mock_sql_logger):
         """Create test builder agent."""
         config = {"auto_scaling_enabled": True}
-        return BuilderAgent(
-            unique_id=1,
-            model=mock_mesa_model,
+        return BuilderAgent(model=mock_mesa_model,
             redis_client=mock_redis_client,
             vector_db=mock_vector_db,
             sql_logger=mock_sql_logger,
@@ -486,7 +466,7 @@ class TestBuilderAgentAutoScaling:
         should_spawn, trigger = agent.should_spawn_agent(metrics)
 
         assert should_spawn is True
-        assert trigger == SpawnTrigger.WORKLOAD_SPIKE
+        assert trigger.value == SpawnTrigger.WORKLOAD_SPIKE.value
 
     def test_should_spawn_performance_drop(self, agent, mock_mesa_model):
         """Test spawning decision on performance drop."""
@@ -497,7 +477,7 @@ class TestBuilderAgentAutoScaling:
         should_spawn, trigger = agent.should_spawn_agent(metrics)
 
         assert should_spawn is True
-        assert trigger == SpawnTrigger.PERFORMANCE_DROP
+        assert trigger.value == SpawnTrigger.PERFORMANCE_DROP.value
 
     def test_should_spawn_below_minimum(self, agent, mock_mesa_model):
         """Test spawning when below minimum agent count."""
@@ -509,7 +489,7 @@ class TestBuilderAgentAutoScaling:
         should_spawn, trigger = agent.should_spawn_agent(metrics)
 
         assert should_spawn is True
-        assert trigger == SpawnTrigger.SCHEDULED
+        assert trigger.value == SpawnTrigger.SCHEDULED.value
 
     def test_should_not_spawn_normal_conditions(self, agent, mock_mesa_model):
         """Test no spawning under normal conditions."""
@@ -539,7 +519,7 @@ class TestBuilderAgentAutoScaling:
         )
 
         assert should_hibernate is True
-        assert trigger == HibernationTrigger.POOR_PERFORMANCE
+        assert trigger.value == HibernationTrigger.POOR_PERFORMANCE.value
 
     def test_should_hibernate_low_workload(self, agent, mock_mesa_model):
         """Test hibernation decision for low workload."""
@@ -556,7 +536,7 @@ class TestBuilderAgentAutoScaling:
         )
 
         assert should_hibernate is True
-        assert trigger == HibernationTrigger.LOW_WORKLOAD
+        assert trigger.value == HibernationTrigger.LOW_WORKLOAD.value
 
     def test_should_not_hibernate_normal_conditions(self, agent, mock_mesa_model):
         """Test no hibernation under normal conditions."""
@@ -582,9 +562,7 @@ class TestBuilderAgentStep:
     @pytest.fixture
     def agent(self, mock_redis_client, mock_mesa_model, mock_vector_db, mock_sql_logger):
         """Create test builder agent."""
-        return BuilderAgent(
-            unique_id=1,
-            model=mock_mesa_model,
+        return BuilderAgent(model=mock_mesa_model,
             redis_client=mock_redis_client,
             vector_db=mock_vector_db,
             sql_logger=mock_sql_logger

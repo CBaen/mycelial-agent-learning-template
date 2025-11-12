@@ -27,7 +27,6 @@ class TestMycelialAgentInit:
     def test_init_with_defaults(self, mock_redis_client, mock_mesa_model):
         """Test initialization with default parameters."""
         agent = MycelialAgent(
-            unique_id=1,
             model=mock_mesa_model,
             redis_client=mock_redis_client
         )
@@ -43,9 +42,7 @@ class TestMycelialAgentInit:
 
     def test_init_with_custom_team_id(self, mock_redis_client, mock_mesa_model):
         """Test initialization with custom team_id."""
-        agent = MycelialAgent(
-            unique_id=2,
-            model=mock_mesa_model,
+        agent = MycelialAgent(model=mock_mesa_model,
             redis_client=mock_redis_client,
             team_id="team_alpha"
         )
@@ -55,9 +52,7 @@ class TestMycelialAgentInit:
     def test_init_with_agent_config(self, mock_redis_client, mock_mesa_model):
         """Test initialization with agent configuration."""
         config = {"learning_rate": 0.01, "discount": 0.99}
-        agent = MycelialAgent(
-            unique_id=3,
-            model=mock_mesa_model,
+        agent = MycelialAgent(model=mock_mesa_model,
             redis_client=mock_redis_client,
             agent_config=config
         )
@@ -66,9 +61,7 @@ class TestMycelialAgentInit:
 
     def test_init_sets_learning_components_to_none(self, mock_redis_client, mock_mesa_model):
         """Test that learning components are None by default."""
-        agent = MycelialAgent(
-            unique_id=4,
-            model=mock_mesa_model,
+        agent = MycelialAgent(model=mock_mesa_model,
             redis_client=mock_redis_client
         )
 
@@ -78,9 +71,7 @@ class TestMycelialAgentInit:
 
     def test_init_empty_teammates_list(self, mock_redis_client, mock_mesa_model):
         """Test that teammates list starts empty."""
-        agent = MycelialAgent(
-            unique_id=5,
-            model=mock_mesa_model,
+        agent = MycelialAgent(model=mock_mesa_model,
             redis_client=mock_redis_client
         )
 
@@ -88,9 +79,7 @@ class TestMycelialAgentInit:
 
     def test_init_performance_tracking(self, mock_redis_client, mock_mesa_model):
         """Test initialization of performance tracking."""
-        agent = MycelialAgent(
-            unique_id=6,
-            model=mock_mesa_model,
+        agent = MycelialAgent(model=mock_mesa_model,
             redis_client=mock_redis_client
         )
 
@@ -100,9 +89,7 @@ class TestMycelialAgentInit:
 
     def test_init_risk_metrics(self, mock_redis_client, mock_mesa_model):
         """Test initialization of risk metrics."""
-        agent = MycelialAgent(
-            unique_id=7,
-            model=mock_mesa_model,
+        agent = MycelialAgent(model=mock_mesa_model,
             redis_client=mock_redis_client
         )
 
@@ -116,9 +103,7 @@ class TestMycelialAgentStep:
     @pytest.fixture
     def agent(self, mock_redis_client, mock_mesa_model):
         """Create test agent."""
-        return MycelialAgent(
-            unique_id=1,
-            model=mock_mesa_model,
+        return MycelialAgent(model=mock_mesa_model,
             redis_client=mock_redis_client
         )
 
@@ -211,9 +196,7 @@ class TestMycelialAgentPolicySharing:
     @pytest.fixture
     def agent(self, mock_redis_client, mock_mesa_model):
         """Create test agent."""
-        return MycelialAgent(
-            unique_id=1,
-            model=mock_mesa_model,
+        return MycelialAgent(model=mock_mesa_model,
             redis_client=mock_redis_client
         )
 
@@ -264,9 +247,7 @@ class TestMycelialAgentCreditAssignment:
     @pytest.fixture
     def agent(self, mock_redis_client, mock_mesa_model):
         """Create test agent."""
-        return MycelialAgent(
-            unique_id=1,
-            model=mock_mesa_model,
+        return MycelialAgent(model=mock_mesa_model,
             redis_client=mock_redis_client
         )
 
@@ -300,9 +281,7 @@ class TestMycelialAgentProtectedMethods:
     @pytest.fixture
     def agent(self, mock_redis_client, mock_mesa_model):
         """Create test agent."""
-        return MycelialAgent(
-            unique_id=1,
-            model=mock_mesa_model,
+        return MycelialAgent(model=mock_mesa_model,
             redis_client=mock_redis_client
         )
 
@@ -390,9 +369,7 @@ class TestMycelialAgentRedisOperations:
     @pytest.fixture
     def agent(self, mock_redis_client, mock_mesa_model):
         """Create test agent."""
-        return MycelialAgent(
-            unique_id=1,
-            model=mock_mesa_model,
+        return MycelialAgent(model=mock_mesa_model,
             redis_client=mock_redis_client,
             team_id="team_test"
         )
@@ -427,14 +404,14 @@ class TestMycelialAgentRedisOperations:
             "step_count": 200,
             "cumulative_reward": 75.0
         }
-        mock_redis_client.get_key_value.return_value = saved_state
+        # Store in mock's internal storage (used by side_effect)
+        key = f"agent:state:{agent.agent_id}"
+        mock_redis_client._storage[key] = saved_state
 
         loaded_state = agent._load_state_from_redis()
 
         assert loaded_state == saved_state
-        mock_redis_client.get_key_value.assert_called_once_with(
-            f"agent:state:{agent.agent_id}"
-        )
+        mock_redis_client.get_key_value.assert_called_once_with(key)
 
     def test_load_state_from_redis_not_found(self, agent, mock_redis_client):
         """Test loading state when none exists."""
@@ -493,9 +470,7 @@ class TestMycelialAgentRiskManagement:
     @pytest.fixture
     def agent(self, mock_redis_client, mock_mesa_model):
         """Create test agent."""
-        return MycelialAgent(
-            unique_id=1,
-            model=mock_mesa_model,
+        return MycelialAgent(model=mock_mesa_model,
             redis_client=mock_redis_client
         )
 
@@ -559,9 +534,7 @@ class TestMycelialAgentTeamCollaboration:
     @pytest.fixture
     def agent(self, mock_redis_client, mock_mesa_model):
         """Create test agent."""
-        return MycelialAgent(
-            unique_id=1,
-            model=mock_mesa_model,
+        return MycelialAgent(model=mock_mesa_model,
             redis_client=mock_redis_client,
             team_id="team_alpha"
         )
@@ -810,9 +783,7 @@ class TestMycelialAgentReset:
     @pytest.fixture
     def agent(self, mock_redis_client, mock_mesa_model):
         """Create test agent."""
-        return MycelialAgent(
-            unique_id=1,
-            model=mock_mesa_model,
+        return MycelialAgent(model=mock_mesa_model,
             redis_client=mock_redis_client
         )
 

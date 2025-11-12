@@ -43,11 +43,11 @@ class BuilderAgent(DynamicAgentBuilder, MycelialAgent):
 
     def __init__(
         self,
-        unique_id: int,
         model,
         redis_client,
         vector_db,
         sql_logger,
+        unique_id: Optional[int] = None,
         team_id: str = "builders",
         agent_config: Optional[Dict[str, Any]] = None
     ):
@@ -55,16 +55,16 @@ class BuilderAgent(DynamicAgentBuilder, MycelialAgent):
         Initialize the Builder Agent.
 
         Args:
-            unique_id: Unique identifier for this agent
             model: The Mesa model this agent belongs to
             redis_client: Redis client for data operations
             vector_db: Vector database for policy storage
             sql_logger: SQLite logger for event logging
+            unique_id: Optional unique identifier (auto-assigned if None)
             team_id: Team identifier (default: "builders")
             agent_config: Optional configuration dictionary
         """
         # Initialize MycelialAgent
-        MycelialAgent.__init__(self, unique_id, model, redis_client, team_id, agent_config)
+        MycelialAgent.__init__(self, model, redis_client, unique_id, team_id, agent_config)
 
         # Initialize DynamicAgentBuilder
         DynamicAgentBuilder.__init__(

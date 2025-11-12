@@ -10,6 +10,15 @@ Unlike conventional multi-agent frameworks that rely on centralized coordination
 
 ---
 
+## Quick Links
+
+- **[PILLARS.md](PILLARS.md)** - 7 Pillars Fundamentals Guide (START HERE)
+- **[Reference Implementations](src/implementations/)** - SimpleFRL, SimpleVDN, SimpleHAVEN
+- **[Examples](examples/)** - Complete domain-specific implementations
+- **[Requirements](requirements.txt)** - Installation dependencies
+
+---
+
 ## Table of Contents
 
 1. [Architecture Overview](#architecture-overview)
@@ -37,6 +46,7 @@ Agents share policy updates in a peer-to-peer "mycelial" network without a centr
 - Privacy-preserving policy exchange
 
 **Core Component**: `/src/core/frl_base.py`
+**Reference Implementation**: `/src/implementations/simple_frl.py`
 
 ### 2. **Value-Decomposition Networks (VDN)** - Credit Assignment
 Solves the multi-agent credit assignment problem by decomposing global rewards into individual agent contributions:
@@ -46,6 +56,7 @@ Solves the multi-agent credit assignment problem by decomposing global rewards i
 - Supports both additive (VDN) and monotonic (QMIX) decomposition
 
 **Core Component**: `/src/core/vdn_base.py`
+**Reference Implementation**: `/src/implementations/simple_vdn.py`
 
 ### 3. **HAVEN Framework** - Risk Coordination
 Lightweight oversight layer that prevents "policy contagion" (bad policies spreading through the network):
@@ -55,6 +66,7 @@ Lightweight oversight layer that prevents "policy contagion" (bad policies sprea
 - Adversarial robustness testing
 
 **Core Component**: `/src/core/haven_base.py`
+**Reference Implementation**: `/src/implementations/simple_haven.py`
 
 ### System Diagram
 

@@ -36,10 +36,10 @@ class SpecialistAgent(MycelialAgent):
 
     def __init__(
         self,
-        unique_id: int,
         model,
         redis_client,
         data_channel: str,
+        unique_id: Optional[int] = None,
         team_id: str = "specialists",
         specialization: Optional[str] = None,
         agent_config: Optional[Dict[str, Any]] = None
@@ -48,15 +48,15 @@ class SpecialistAgent(MycelialAgent):
         Initialize the Specialist Agent.
 
         Args:
-            unique_id: Unique identifier for this agent
             model: The Mesa model this agent belongs to
             redis_client: Redis client for data operations
             data_channel: Pub/Sub channel to receive data from
+            unique_id: Optional unique identifier (auto-assigned if None)
             team_id: Team identifier for Rule of 3 collaboration
             specialization: Optional specialization type (e.g., "classifier", "optimizer")
             agent_config: Optional configuration dictionary
         """
-        super().__init__(unique_id, model, redis_client, team_id, agent_config)
+        super().__init__(model, redis_client, unique_id, team_id, agent_config)
 
         # Connect to Vector DB from model (for teammate policy sharing)
         self.vector_db = model.vector_db if hasattr(model, 'vector_db') else None
@@ -130,8 +130,23 @@ class SpecialistAgent(MycelialAgent):
             action = self._select_action(self.current_state)
             self.last_action = action
 
-            # Execute action and get reward
-            reward = self._execute_action(action)
+            # ===== BIG ROCK 4: RECORD ACTION & COMPUTE INTRINSIC REWARD =====
+            # Record action for novelty detection
+            self.record_action(action)
+
+            # Execute action and get extrinsic reward
+            extrinsic_reward = self._execute_action(action)
+
+            # Compute intrinsic motivation reward
+            intrinsic_reward = self.compute_intrinsic_reward(action, self.current_state)
+
+            # Total reward = extrinsic + intrinsic
+            reward = extrinsic_reward + intrinsic_reward
+
+            if intrinsic_reward > 0:
+                logger.debug("%s: Total reward = %.3f (extrinsic: %.3f + intrinsic: %.3f)",
+                           self.agent_id, reward, extrinsic_reward, intrinsic_reward)
+            # ================================================================
 
             # Get local credit if VDN is enabled
             if self.vdn_engine is not None:
@@ -156,6 +171,10 @@ class SpecialistAgent(MycelialAgent):
             # Update average task reward
             self._update_average_task_reward(local_reward)
 
+            # ===== BIG ROCK 4: UPDATE GAMIFICATION =====
+            self.update_gamification(local_reward)
+            # ===========================================
+
         # Decay exploration rate
         self._decay_exploration()
 
@@ -167,8 +186,10 @@ class SpecialistAgent(MycelialAgent):
                 logger.debug("%s shared policy %s with team", self.agent_id, policy_id)
 
         # Learn from teammate policies via Vector DB
+        # BIG ROCK 4: Only learn if not converged/satisfied
         if self.vector_db is not None and self.step_count % 20 == 0:
-            self._learn_from_teammates()
+            if self.should_continue_learning():
+                self._learn_from_teammates()
 
         # Share policy with peers via FRL (inter-team)
         if self.frl_engine is not None and self._should_share_policy():
@@ -177,7 +198,8 @@ class SpecialistAgent(MycelialAgent):
                 self.collaboration_count += 1
 
         # Receive policy updates from peers via FRL
-        if self.frl_engine is not None:
+        # BIG ROCK 4: Only receive if still learning
+        if self.frl_engine is not None and self.should_continue_learning():
             self._receive_peer_policies()
 
         # Update performance metrics
@@ -490,7 +512,23 @@ class SpecialistAgent(MycelialAgent):
 
         This implements the "Rule of 3" team collaboration by retrieving
         similar policies from teammates and integrating their insights.
+
+        BIG ROCK 4: Includes convergence and satisfaction safeguards.
         """
+        # ===== BIG ROCK 4: SAFEGUARDS =====
+        # Check if agent should continue learning
+        if not self.should_continue_learning():
+            logger.debug("%s skipping teammate learning (converged/satisfied/max_iterations)",
+                        self.agent_id)
+            return
+
+        # Increment learning iteration counter
+        self.learning_iterations += 1
+
+        # Record performance before learning
+        old_performance = self.average_task_reward
+        # ===================================
+
         if self.policy_embedding is None:
             self._update_policy_embedding()
 
@@ -510,6 +548,11 @@ class SpecialistAgent(MycelialAgent):
 
                 logger.info("%s learned from %d teammate policies",
                            self.agent_id, len(teammate_policies))
+
+                # ===== BIG ROCK 4: TRACK IMPROVEMENT =====
+                new_performance = self.average_task_reward
+                self.record_policy_improvement(old_performance, new_performance)
+                # ==========================================
 
         except Exception as e:
             logger.error("%s: Error learning from teammates: %s", self.agent_id, e)

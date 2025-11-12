@@ -49,10 +49,10 @@ class RiskManagerAgent(MycelialAgent):
 
     def __init__(
         self,
-        unique_id: int,
         model,
         redis_client,
         haven_coordinator: HavenRiskCoordinator,
+        unique_id: Optional[int] = None,
         team_id: str = "risk_managers",
         agent_config: Optional[Dict[str, Any]] = None
     ):
@@ -60,14 +60,14 @@ class RiskManagerAgent(MycelialAgent):
         Initialize the Risk Manager Agent.
 
         Args:
-            unique_id: Unique identifier for this agent
             model: The Mesa model this agent belongs to
             redis_client: Redis client for data operations
             haven_coordinator: HAVEN risk coordinator instance
+            unique_id: Optional unique identifier (auto-assigned if None)
             team_id: Team identifier (default: "risk_managers")
             agent_config: Optional configuration dictionary
         """
-        super().__init__(unique_id, model, redis_client, team_id, agent_config)
+        super().__init__(model, redis_client, unique_id, team_id, agent_config)
 
         # HAVEN coordinator for risk management
         self.haven_coordinator = haven_coordinator

@@ -44,9 +44,9 @@ class MycelialAgent(Agent):
 
     def __init__(
         self,
-        unique_id: int,
         model,
         redis_client,
+        unique_id: Optional[int] = None,
         team_id: str = "default",
         agent_config: Optional[Dict[str, Any]] = None
     ):
@@ -54,20 +54,21 @@ class MycelialAgent(Agent):
         Initialize the Mycelial Agent.
 
         Args:
-            unique_id: Unique identifier for this agent (required by Mesa)
             model: The MycelialModel this agent belongs to
             redis_client: Redis client for data operations and communication
+            unique_id: Optional unique identifier for this agent (auto-assigned if None)
             team_id: Team identifier for collaboration (Rule of 3)
             agent_config: Optional configuration dictionary for agent parameters
         """
-        super().__init__(unique_id, model)
+        super().__init__(model)
 
         self.redis_client = redis_client
         self.agent_config = agent_config or {}
 
         # Agent identification
         self.agent_type = self.__class__.__name__
-        self.agent_id = f"{self.agent_type}_{unique_id}"
+        # Mesa 3.x auto-assigns unique_id in the model
+        self.agent_id = f"{self.agent_type}_{self.unique_id}"
 
         # Team-based collaboration (Rule of 3)
         self.team_id = team_id
@@ -100,6 +101,37 @@ class MycelialAgent(Agent):
         # Risk metrics (for HAVEN compatibility)
         self.risk_score: float = 0.0
         self.is_isolated: bool = False
+
+        # =====================================================================
+        # BIG ROCK 4: MOTIVATION & SAFEGUARD LAYER
+        # =====================================================================
+
+        # Convergence safeguards (prevents infinite learning loops)
+        self.learning_iterations: int = 0
+        self.max_learning_iterations: int = self.agent_config.get("max_learning_iterations", 100)
+        self.convergence_threshold: float = self.agent_config.get("convergence_threshold", 0.01)
+        self.policy_improvement_window: List[float] = []
+        self.last_n_improvements: int = 10
+        self.has_reached_convergence: bool = False
+
+        # Satisfaction metric (determines when agent is "done" learning)
+        self.satisfaction_score: float = 0.0
+        self.satisfaction_threshold: float = self.agent_config.get("satisfaction_threshold", 0.85)
+        self.team_satisfaction: Optional[float] = None
+        self.is_satisfied_state: bool = False
+
+        # Gamification layer (motivation system)
+        self.agent_level: int = 1
+        self.experience_points: int = 0
+        self.achievements: List[str] = []
+        self.peer_rank: Optional[int] = None
+        self.team_rank: Optional[int] = None
+
+        # Intrinsic motivation parameters
+        self.exploration_bonus: float = self.agent_config.get("exploration_bonus", 0.1)
+        self.novelty_threshold: float = self.agent_config.get("novelty_threshold", 0.8)
+        self.action_history: List[Any] = []  # For novelty detection
+        self.action_history_size: int = 100
 
         logger.info("Initialized %s (ID: %s, Team: %s)",
                    self.agent_type, self.agent_id, self.team_id)
@@ -694,6 +726,393 @@ class MycelialAgent(Agent):
         # Find rank (1-indexed)
         rank = all_rewards.index(self.cumulative_reward) + 1
         return rank
+
+    # =========================================================================
+    # BIG ROCK 4: CONVERGENCE SAFEGUARDS & SATISFACTION METRIC
+    # =========================================================================
+
+    def has_converged(self) -> bool:
+        """
+        Check if agent has converged and should stop iterative learning.
+
+        Convergence criteria:
+        - Policy improvements over last N iterations are below threshold
+        - Indicates agent has reached a stable, optimal (or near-optimal) policy
+
+        This prevents infinite learning loops in the mycelial network.
+
+        Returns:
+            True if agent has converged (should stop learning)
+        """
+        import numpy as np
+
+        # Need sufficient history
+        if len(self.policy_improvement_window) < self.last_n_improvements:
+            return False
+
+        # Calculate average improvement over last N iterations
+        recent_improvements = self.policy_improvement_window[-self.last_n_improvements:]
+        avg_improvement = np.mean(recent_improvements)
+
+        # Converged if average improvement is below threshold
+        has_converged = avg_improvement < self.convergence_threshold
+
+        if has_converged and not self.has_reached_convergence:
+            self.has_reached_convergence = True
+            logger.info("%s has CONVERGED (avg improvement: %.4f < %.4f)",
+                       self.agent_id, avg_improvement, self.convergence_threshold)
+
+        return has_converged
+
+    def record_policy_improvement(self, old_performance: float, new_performance: float):
+        """
+        Record improvement in policy performance for convergence tracking.
+
+        Args:
+            old_performance: Performance before policy update
+            new_performance: Performance after policy update
+        """
+        improvement = new_performance - old_performance
+        self.policy_improvement_window.append(improvement)
+
+        # Limit window size
+        if len(self.policy_improvement_window) > 50:
+            self.policy_improvement_window = self.policy_improvement_window[-50:]
+
+        logger.debug("%s policy improvement: %.4f (window: %d)",
+                    self.agent_id, improvement, len(self.policy_improvement_window))
+
+    def compute_satisfaction(self) -> float:
+        """
+        Compute agent's satisfaction with current policy performance.
+
+        Satisfaction is a weighted metric combining:
+        - Recent performance (40%)
+        - Improvement rate (30%)
+        - Stability/consistency (20%)
+        - Social comparison to teammates (10%)
+
+        Returns:
+            Satisfaction score (0.0 to 1.0)
+        """
+        import numpy as np
+
+        satisfaction = 0.0
+
+        # Component 1: Recent Performance (40%)
+        if self.performance_history:
+            recent_window = min(20, len(self.performance_history))
+            recent_perf = np.mean(self.performance_history[-recent_window:])
+            # Normalize to 0-1 range (assumes rewards typically 0-1)
+            perf_component = np.clip(recent_perf, 0.0, 1.0)
+            satisfaction += 0.4 * perf_component
+
+        # Component 2: Improvement Rate (30%)
+        if len(self.performance_history) > 10:
+            improvement_rate = self._compute_improvement_rate()
+            # Normalize: 10% improvement = 1.0 satisfaction component
+            improvement_component = np.clip(improvement_rate / 0.1, 0.0, 1.0)
+            satisfaction += 0.3 * improvement_component
+
+        # Component 3: Stability/Consistency (20%)
+        if len(self.performance_history) > 20:
+            recent_window = self.performance_history[-20:]
+            variance = np.var(recent_window)
+            # Lower variance = higher stability
+            # Use inverse: stability = 1 / (1 + variance)
+            stability = 1.0 / (1.0 + variance)
+            satisfaction += 0.2 * stability
+
+        # Component 4: Social Comparison (10%)
+        if self.team_satisfaction is not None and self.team_satisfaction > 0:
+            # Compare to team average
+            success_rate = self._get_success_rate()
+            relative_performance = success_rate / max(0.01, self.team_satisfaction)
+            social_component = np.clip(relative_performance, 0.0, 1.0)
+            satisfaction += 0.1 * social_component
+        else:
+            # No team data, just use own success rate
+            satisfaction += 0.1 * self._get_success_rate()
+
+        # Final satisfaction score
+        self.satisfaction_score = np.clip(satisfaction, 0.0, 1.0)
+
+        return self.satisfaction_score
+
+    def is_satisfied(self) -> bool:
+        """
+        Check if agent is satisfied with current performance.
+
+        A satisfied agent should reduce learning activity to conserve
+        resources and prevent unnecessary policy churn.
+
+        Returns:
+            True if agent is satisfied (performance is "good enough")
+        """
+        satisfaction = self.compute_satisfaction()
+        is_satisfied = satisfaction >= self.satisfaction_threshold
+
+        if is_satisfied and not self.is_satisfied_state:
+            self.is_satisfied_state = True
+            logger.info("%s is SATISFIED (satisfaction: %.3f >= %.3f)",
+                       self.agent_id, satisfaction, self.satisfaction_threshold)
+
+        return is_satisfied
+
+    def _compute_improvement_rate(self) -> float:
+        """
+        Compute rate of performance improvement over recent history.
+
+        Returns:
+            Improvement rate (positive = improving, negative = declining)
+        """
+        import numpy as np
+
+        if len(self.performance_history) < 10:
+            return 0.0
+
+        # Compare first half to second half of recent window
+        window_size = min(20, len(self.performance_history))
+        recent = self.performance_history[-window_size:]
+
+        half = len(recent) // 2
+        first_half_avg = np.mean(recent[:half])
+        second_half_avg = np.mean(recent[half:])
+
+        # Improvement rate (as fraction)
+        if first_half_avg > 0:
+            improvement_rate = (second_half_avg - first_half_avg) / first_half_avg
+        else:
+            improvement_rate = 0.0
+
+        return improvement_rate
+
+    def should_continue_learning(self) -> bool:
+        """
+        Determine if agent should continue active learning.
+
+        Stops learning if:
+        1. Agent has converged (policy is stable)
+        2. Agent is satisfied (performance is good enough)
+        3. Max learning iterations reached (safety limit)
+
+        Returns:
+            True if agent should continue learning
+        """
+        # Check hard limits first (safety)
+        if self.learning_iterations >= self.max_learning_iterations:
+            logger.warning("%s reached max learning iterations (%d), stopping",
+                          self.agent_id, self.max_learning_iterations)
+            return False
+
+        # Check convergence
+        if self.has_converged():
+            logger.debug("%s has converged, reducing learning activity", self.agent_id)
+            # Don't completely stop, but reduce frequency
+            return self.step_count % 10 == 0  # Learn only every 10 steps
+
+        # Check satisfaction
+        if self.is_satisfied():
+            logger.debug("%s is satisfied, reducing learning activity", self.agent_id)
+            # Learn occasionally to avoid stagnation
+            return self.step_count % 5 == 0  # Learn only every 5 steps
+
+        # Continue normal learning
+        return True
+
+    # =========================================================================
+    # BIG ROCK 4: GAMIFICATION & INTRINSIC MOTIVATION
+    # =========================================================================
+
+    def compute_intrinsic_reward(self, action: Any, state: Dict[str, Any]) -> float:
+        """
+        Compute intrinsic motivation reward.
+
+        Intrinsic rewards drive exploration and prevent stagnation by
+        rewarding:
+        1. Novelty (curiosity) - Trying new actions
+        2. Learning progress - Improving performance
+        3. Social ranking - Competing with peers
+
+        Args:
+            action: Action taken
+            state: Current state
+
+        Returns:
+            Intrinsic reward (added to extrinsic reward)
+        """
+        intrinsic = 0.0
+
+        # 1. Exploration bonus (curiosity)
+        if self._is_novel_action(action, state):
+            intrinsic += self.exploration_bonus
+            logger.debug("%s: Novel action bonus +%.3f", self.agent_id, self.exploration_bonus)
+
+        # 2. Learning progress bonus (improvement motivation)
+        if len(self.performance_history) > 10:
+            improvement_rate = self._compute_improvement_rate()
+            if improvement_rate > 0:
+                progress_bonus = improvement_rate * 0.05  # Up to 5% bonus for 100% improvement
+                intrinsic += progress_bonus
+                logger.debug("%s: Learning progress bonus +%.4f", self.agent_id, progress_bonus)
+
+        # 3. Social ranking bonus (competition motivation)
+        if self.peer_rank is not None and self.peer_rank <= 10:
+            # Top 10 agents get bonus
+            rank_bonus = (11 - self.peer_rank) * 0.002  # 0.02 for rank 1, 0.002 for rank 10
+            intrinsic += rank_bonus
+            logger.debug("%s: Top-10 rank bonus +%.4f (rank %d)",
+                        self.agent_id, rank_bonus, self.peer_rank)
+
+        return intrinsic
+
+    def _is_novel_action(self, action: Any, state: Dict[str, Any]) -> bool:
+        """
+        Determine if action is novel (haven't done similar action recently).
+
+        Args:
+            action: Action to check
+            state: Current state
+
+        Returns:
+            True if action is novel
+        """
+        if not self.action_history:
+            return True
+
+        # Simple novelty check: action not in recent history
+        # For more sophisticated novelty, use embedding similarity
+        recent_actions = self.action_history[-20:]  # Check last 20 actions
+
+        # Convert action to comparable form
+        action_str = str(action)
+
+        # Novel if not seen in recent history
+        is_novel = action_str not in [str(a) for a in recent_actions]
+
+        return is_novel
+
+    def record_action(self, action: Any):
+        """
+        Record action for novelty detection.
+
+        Args:
+            action: Action taken
+        """
+        self.action_history.append(action)
+
+        # Limit history size
+        if len(self.action_history) > self.action_history_size:
+            self.action_history = self.action_history[-self.action_history_size:]
+
+    def update_gamification(self, reward: float):
+        """
+        Update gamification metrics (levels, XP, achievements).
+
+        This system motivates agents through progression and recognition.
+
+        Args:
+            reward: Reward received (used to calculate XP)
+        """
+        # Add experience points (scaled by 100 for granularity)
+        xp_gained = int(abs(reward) * 100)
+        self.experience_points += xp_gained
+
+        # Check for level up
+        xp_required = self.agent_level * 1000  # Linear scaling
+        if self.experience_points >= xp_required:
+            old_level = self.agent_level
+            self.agent_level += 1
+            logger.info("%s LEVELED UP! Level %d -> %d (XP: %d)",
+                       self.agent_id, old_level, self.agent_level, self.experience_points)
+
+            # Unlock achievement
+            self.unlock_achievement(f"Level {self.agent_level} Reached")
+
+            # Boost motivation (reduce exploration threshold slightly)
+            if self.exploration_bonus < 0.5:
+                self.exploration_bonus += 0.01
+
+        # Check for milestone achievements
+        self._check_achievements()
+
+    def _check_achievements(self):
+        """Check and unlock achievements based on performance milestones."""
+
+        # Task completion achievements
+        if self.step_count >= 100 and "Centurion" not in self.achievements:
+            self.unlock_achievement("Centurion")
+
+        if self.step_count >= 1000 and "Millennium" not in self.achievements:
+            self.unlock_achievement("Millennium")
+
+        # Reward achievements
+        if self.cumulative_reward >= 100 and "Apprentice" not in self.achievements:
+            self.unlock_achievement("Apprentice")
+
+        if self.cumulative_reward >= 1000 and "Master" not in self.achievements:
+            self.unlock_achievement("Master")
+
+        if self.cumulative_reward >= 10000 and "Grandmaster" not in self.achievements:
+            self.unlock_achievement("Grandmaster")
+
+        # Collaboration achievements
+        if self.policies_shared_with_team >= 50 and "Team Player" not in self.achievements:
+            self.unlock_achievement("Team Player")
+
+        if self.policies_shared_with_team >= 200 and "Mentor" not in self.achievements:
+            self.unlock_achievement("Mentor")
+
+        # Performance achievements
+        success_rate = self._get_success_rate()
+        if success_rate >= 0.9 and self.step_count >= 100 and "Elite" not in self.achievements:
+            self.unlock_achievement("Elite")
+
+        # Convergence achievement
+        if self.has_reached_convergence and "Convergence Master" not in self.achievements:
+            self.unlock_achievement("Convergence Master")
+
+        # Satisfaction achievement
+        if self.is_satisfied_state and "Satisfied Achiever" not in self.achievements:
+            self.unlock_achievement("Satisfied Achiever")
+
+    def unlock_achievement(self, achievement_name: str):
+        """
+        Unlock an achievement.
+
+        Args:
+            achievement_name: Name of achievement to unlock
+        """
+        if achievement_name not in self.achievements:
+            self.achievements.append(achievement_name)
+            logger.info("%s UNLOCKED ACHIEVEMENT: '%s'", self.agent_id, achievement_name)
+
+            # Achievements give XP bonus
+            self.experience_points += 500
+
+    def get_gamification_status(self) -> Dict[str, Any]:
+        """
+        Get current gamification status.
+
+        Returns:
+            Dictionary with level, XP, achievements, ranks
+        """
+        xp_required = self.agent_level * 1000
+        xp_progress = (self.experience_points % xp_required) / xp_required
+
+        return {
+            "agent_id": self.agent_id,
+            "level": self.agent_level,
+            "experience_points": self.experience_points,
+            "xp_to_next_level": xp_required - (self.experience_points % xp_required),
+            "level_progress": xp_progress,
+            "achievements": self.achievements,
+            "achievement_count": len(self.achievements),
+            "peer_rank": self.peer_rank,
+            "team_rank": self.team_rank,
+            "satisfaction_score": self.satisfaction_score,
+            "has_converged": self.has_reached_convergence
+        }
 
     def reset(self):
         """
