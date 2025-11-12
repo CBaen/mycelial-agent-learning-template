@@ -16,6 +16,7 @@ from collections import defaultdict
 import logging
 import sys
 import time
+import numpy as np
 from pathlib import Path
 
 # Add parent directory to path
@@ -32,6 +33,12 @@ from src.core.marker_types import MarkerType
 # BIG ROCK 7: GNN COMMUNICATION
 from src.core.gnn_communicator import GNNCommunicator
 from src.core.gnn_message import GNNMessage, MessageType
+
+# BIG ROCK 8: TRANSFER LEARNING & META-LEARNING
+from src.core.task_representation import TaskDescriptor, TaskEmbedding
+from src.core.knowledge_base import KnowledgeBase, Episode, ExperienceTransition
+from src.core.transfer_learning import TransferLearningEngine, TransferStrategy, TransferResult
+from src.core.maml import MAMLLearner, MAMLConfig, AdaptationResult
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +72,10 @@ class MycelialAgent(Agent):
         agent_config: Optional[Dict[str, Any]] = None,
         signal_bus: Optional[ElectricalSignalBus] = None,
         stigmergy_env: Optional[StigmergicEnvironment] = None,
-        gnn_communicator: Optional[GNNCommunicator] = None
+        gnn_communicator: Optional[GNNCommunicator] = None,
+        knowledge_base: Optional[KnowledgeBase] = None,
+        transfer_engine: Optional[TransferLearningEngine] = None,
+        maml_learner: Optional[MAMLLearner] = None
     ):
         """
         Initialize the Mycelial Agent.
@@ -79,6 +89,9 @@ class MycelialAgent(Agent):
             signal_bus: Optional ElectricalSignalBus for ultra-fast signaling (Big Rock 5)
             stigmergy_env: Optional StigmergicEnvironment for indirect coordination (Big Rock 6)
             gnn_communicator: Optional GNNCommunicator for intelligent message routing (Big Rock 7)
+            knowledge_base: Optional KnowledgeBase for experience storage and retrieval (Big Rock 8)
+            transfer_engine: Optional TransferLearningEngine for knowledge transfer (Big Rock 8)
+            maml_learner: Optional MAMLLearner for meta-learning (Big Rock 8)
         """
         super().__init__(model)
 
@@ -113,6 +126,15 @@ class MycelialAgent(Agent):
         self.gnn_communicator = gnn_communicator  # GNN-based message routing
         self.gnn_message_handlers: Dict[str, Callable[[GNNMessage], None]] = {}
         self.capabilities: Set[str] = set(self.agent_config.get("capabilities", []))
+
+        # BIG ROCK 8: TRANSFER LEARNING & META-LEARNING
+        self.knowledge_base = knowledge_base  # Centralized experience storage
+        self.transfer_engine = transfer_engine  # Transfer learning orchestrator
+        self.maml_learner = maml_learner  # Meta-learning for few-shot adaptation
+        self.current_task: Optional[TaskDescriptor] = None  # Current task descriptor
+        self.episode_transitions: List[ExperienceTransition] = []  # Current episode buffer
+        self.transfer_enabled: bool = self.agent_config.get("transfer_enabled", False)
+        self.maml_enabled: bool = self.agent_config.get("maml_enabled", False)
 
         # State tracking
         self.current_state: Dict[str, Any] = {}
@@ -2103,3 +2125,350 @@ class MycelialAgent(Agent):
             return None
 
         return self.gnn_communicator.get_communication_statistics()
+
+    # =========================================================================
+    # BIG ROCK 8: TRANSFER LEARNING & META-LEARNING
+    # =========================================================================
+
+    def begin_new_task(
+        self,
+        task_descriptor: TaskDescriptor,
+        use_transfer: bool = True,
+        use_maml: bool = False,
+        min_similarity: float = 0.5,
+        k_source_tasks: int = 3
+    ) -> Dict[str, Any]:
+        """
+        Begin learning a new task with optional transfer learning and meta-learning.
+
+        This method automatically:
+        1. Identifies similar previously learned tasks
+        2. Transfers relevant knowledge (policy, experiences, value function)
+        3. Optionally applies MAML few-shot adaptation
+        4. Returns transfer metrics including speed-up estimates
+
+        Args:
+            task_descriptor: Descriptor for the new task
+            use_transfer: Whether to use transfer learning
+            use_maml: Whether to use MAML meta-learning
+            min_similarity: Minimum task similarity for transfer
+            k_source_tasks: Number of source tasks to consider
+
+        Returns:
+            Dictionary with transfer results and metrics
+
+        Example:
+            >>> task = TaskDescriptor(
+            ...     task_id="navigation_v2",
+            ...     task_type="navigation",
+            ...     state_dim=10,
+            ...     action_dim=4
+            ... )
+            >>> result = agent.begin_new_task(task, use_transfer=True, use_maml=True)
+            >>> print(f"Transfer speedup: {result.get('speedup_estimate', 1)}x")
+        """
+        self.current_task = task_descriptor
+        result = {
+            'task_id': task_descriptor.task_id,
+            'task_type': task_descriptor.task_type,
+            'transfer_used': False,
+            'maml_used': False,
+            'speedup_estimate': 1.0
+        }
+
+        # Register task with knowledge base if available
+        if self.knowledge_base:
+            self.knowledge_base.similarity_matrix.add_task(task_descriptor)
+
+        # Transfer learning
+        if use_transfer and self.transfer_engine and self.transfer_enabled:
+            logger.info(
+                "%s: Initiating transfer learning for task %s",
+                self.agent_id, task_descriptor.task_id
+            )
+
+            transfer_result = self.transfer_engine.initiate_transfer(
+                target_task=task_descriptor,
+                agent_id=self.agent_id,
+                strategy=TransferStrategy.COMBINED,
+                min_similarity=min_similarity,
+                k_source_tasks=k_source_tasks
+            )
+
+            result['transfer_used'] = True
+            result['transfer_result'] = transfer_result.to_dict()
+            result['num_experiences_transferred'] = transfer_result.num_experiences_transferred
+            result['num_source_tasks'] = len(transfer_result.source_tasks)
+
+            # Estimate speed-up based on transferred knowledge
+            if transfer_result.num_experiences_transferred > 0:
+                # Rough estimate: 10x speedup per 1000 experiences
+                speedup = 1.0 + min(
+                    transfer_result.num_experiences_transferred / 100.0,
+                    100.0
+                )
+                result['speedup_estimate'] = speedup
+
+        # MAML meta-learning adaptation
+        if use_maml and self.maml_learner and self.maml_enabled:
+            logger.info(
+                "%s: Attempting MAML adaptation for task %s",
+                self.agent_id, task_descriptor.task_id
+            )
+
+            # Check if we have few-shot support examples
+            if self.knowledge_base:
+                support_episodes = self.knowledge_base.retrieve_successful_episodes(
+                    task_id=task_descriptor.task_id,
+                    k=5
+                )
+
+                if support_episodes:
+                    adaptation_result = self.maml_learner.adapt_to_task(
+                        target_task=task_descriptor,
+                        agent_id=self.agent_id,
+                        support_episodes=support_episodes
+                    )
+
+                    result['maml_used'] = True
+                    result['maml_result'] = adaptation_result.to_dict()
+                    result['performance_gain'] = adaptation_result.performance_gain
+
+                    # Update speedup estimate
+                    if adaptation_result.performance_gain > 0:
+                        result['speedup_estimate'] *= (1.0 + adaptation_result.performance_gain * 5)
+
+        logger.info(
+            "%s: Started task %s with estimated %sx speedup (transfer=%s, maml=%s)",
+            self.agent_id, task_descriptor.task_id,
+            result['speedup_estimate'], result['transfer_used'], result['maml_used']
+        )
+
+        return result
+
+    def store_transition_for_transfer(
+        self,
+        state: np.ndarray,
+        action: Any,
+        reward: float,
+        next_state: np.ndarray,
+        done: bool,
+        metadata: Optional[Dict[str, Any]] = None
+    ):
+        """
+        Store experience transition for future transfer learning.
+
+        Args:
+            state: Current state
+            action: Action taken
+            reward: Reward received
+            next_state: Next state
+            done: Whether episode ended
+            metadata: Optional additional metadata
+        """
+        if not self.knowledge_base or not self.current_task:
+            return
+
+        transition = ExperienceTransition(
+            task_id=self.current_task.task_id,
+            state=state,
+            action=action,
+            reward=reward,
+            next_state=next_state,
+            done=done,
+            agent_id=self.agent_id,
+            metadata=metadata or {}
+        )
+
+        # Store in knowledge base
+        self.knowledge_base.store_transition(transition, priority=abs(reward))
+
+        # Buffer for episode completion
+        self.episode_transitions.append(transition)
+
+        logger.debug(
+            "%s: Stored transition for task %s (buffer size: %d)",
+            self.agent_id, self.current_task.task_id, len(self.episode_transitions)
+        )
+
+    def store_episode_for_transfer(
+        self,
+        total_reward: float,
+        success: bool,
+        clear_buffer: bool = True
+    ) -> Optional[str]:
+        """
+        Store completed episode for future transfer learning.
+
+        Args:
+            total_reward: Total episode reward
+            success: Whether episode was successful
+            clear_buffer: Whether to clear transition buffer after storing
+
+        Returns:
+            Episode ID if stored successfully, None otherwise
+        """
+        if not self.knowledge_base or not self.current_task:
+            return None
+
+        if not self.episode_transitions:
+            logger.warning("%s: No transitions to store for episode", self.agent_id)
+            return None
+
+        # Create episode
+        episode_id = f"{self.current_task.task_id}_{self.agent_id}_{int(time.time())}"
+        episode = Episode(
+            episode_id=episode_id,
+            task_id=self.current_task.task_id,
+            agent_id=self.agent_id,
+            transitions=self.episode_transitions.copy(),
+            total_reward=total_reward,
+            episode_length=len(self.episode_transitions),
+            success=success
+        )
+
+        # Store in knowledge base
+        self.knowledge_base.store_episode(episode)
+
+        logger.info(
+            "%s: Stored episode %s for task %s (reward=%.2f, success=%s, length=%d)",
+            self.agent_id, episode_id, self.current_task.task_id,
+            total_reward, success, len(self.episode_transitions)
+        )
+
+        # Clear buffer if requested
+        if clear_buffer:
+            self.episode_transitions.clear()
+
+        return episode_id
+
+    def store_policy_for_transfer(self, policy: Any):
+        """
+        Store current policy for future transfer learning.
+
+        Args:
+            policy: Policy object/parameters to store
+        """
+        if not self.knowledge_base or not self.current_task:
+            return
+
+        policy_key = f"{self.current_task.task_id}_{self.agent_id}"
+        self.knowledge_base.store_policy(policy_key, policy)
+
+        logger.debug(
+            "%s: Stored policy for task %s",
+            self.agent_id, self.current_task.task_id
+        )
+
+    def store_value_function_for_transfer(self, value_function: Any):
+        """
+        Store current value function for future transfer learning.
+
+        Args:
+            value_function: Value function object/parameters to store
+        """
+        if not self.knowledge_base or not self.current_task:
+            return
+
+        vf_key = f"{self.current_task.task_id}_{self.agent_id}"
+        self.knowledge_base.store_value_function(vf_key, value_function)
+
+        logger.debug(
+            "%s: Stored value function for task %s",
+            self.agent_id, self.current_task.task_id
+        )
+
+    def evaluate_transfer_performance(
+        self,
+        baseline_performance: float,
+        current_performance: float,
+        baseline_samples: int,
+        current_samples: int
+    ) -> Dict[str, Any]:
+        """
+        Evaluate effectiveness of transfer learning.
+
+        Args:
+            baseline_performance: Performance without transfer
+            current_performance: Performance with transfer
+            baseline_samples: Samples needed without transfer
+            current_samples: Samples needed with transfer
+
+        Returns:
+            Dictionary with evaluation metrics including speedup factor
+        """
+        if not self.transfer_engine or not self.current_task:
+            return {}
+
+        return self.transfer_engine.evaluate_transfer(
+            target_task_id=self.current_task.task_id,
+            baseline_performance=baseline_performance,
+            transfer_performance=current_performance,
+            baseline_samples=baseline_samples,
+            transfer_samples=current_samples
+        )
+
+    def get_transfer_statistics(self) -> Optional[Dict[str, Any]]:
+        """
+        Get transfer learning statistics for this agent.
+
+        Returns:
+            Dictionary with transfer metrics, or None if not available
+        """
+        if not self.transfer_engine:
+            return None
+
+        history = self.transfer_engine.get_transfer_history(agent_id=self.agent_id)
+
+        if not history:
+            return {
+                'agent_id': self.agent_id,
+                'num_transfers': 0,
+                'avg_speedup': 0.0,
+                'total_experiences_transferred': 0
+            }
+
+        speedups = [r.speedup_factor for r in history if r.speedup_factor is not None]
+        total_experiences = sum(r.num_experiences_transferred for r in history)
+
+        return {
+            'agent_id': self.agent_id,
+            'num_transfers': len(history),
+            'avg_speedup': np.mean(speedups) if speedups else 0.0,
+            'max_speedup': max(speedups) if speedups else 0.0,
+            'total_experiences_transferred': total_experiences,
+            'current_task': self.current_task.task_id if self.current_task else None,
+            'transfer_enabled': self.transfer_enabled,
+            'maml_enabled': self.maml_enabled
+        }
+
+    def get_maml_statistics(self) -> Optional[Dict[str, Any]]:
+        """
+        Get MAML meta-learning statistics for this agent.
+
+        Returns:
+            Dictionary with MAML metrics, or None if not available
+        """
+        if not self.maml_learner:
+            return None
+
+        history = self.maml_learner.get_adaptation_history(agent_id=self.agent_id)
+
+        if not history:
+            return {
+                'agent_id': self.agent_id,
+                'num_adaptations': 0,
+                'avg_performance_gain': 0.0,
+                'meta_initialized': self.maml_learner.meta_initialized
+            }
+
+        gains = [r.performance_gain for r in history]
+
+        return {
+            'agent_id': self.agent_id,
+            'num_adaptations': len(history),
+            'avg_performance_gain': np.mean(gains) if gains else 0.0,
+            'max_performance_gain': max(gains) if gains else 0.0,
+            'meta_initialized': self.maml_learner.meta_initialized,
+            'current_task': self.current_task.task_id if self.current_task else None
+        }
