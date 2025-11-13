@@ -30,6 +30,9 @@ from src.api.schemas import (
     ComponentHealth, ResourceUsage
 )
 
+# Import auth router
+from src.api.rest import auth_routes
+
 # Global state management (would be replaced with proper state manager in production)
 class APIState:
     """Global API state."""
@@ -73,6 +76,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+# Include authentication router
+app.include_router(auth_routes.router)
 
 
 # Middleware for request tracking
