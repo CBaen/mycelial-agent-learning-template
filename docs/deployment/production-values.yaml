@@ -1,0 +1,422 @@
+# ============================================================================
+# MAE Production Deployment Values
+# ============================================================================
+# Recommended configuration for production deployments
+# ============================================================================
+
+# ============================================================================
+# Global Settings
+# ============================================================================
+global:
+  storageClass: "gp3"  # AWS EBS gp3 (adjust for your cloud provider)
+  imagePullSecrets:
+    - name: ghcr-credentials
+
+# ============================================================================
+# API Configuration
+# ============================================================================
+api:
+  replicaCount: 5  # High availability
+
+  image:
+    repository: ghcr.io/yourusername/mae-api
+    tag: "v1.0.0"  # Use specific version tags in production
+    pullPolicy: IfNotPresent
+
+  service:
+    type: ClusterIP
+    port: 8080
+    annotations:
+      prometheus.io/scrape: "true"
+      prometheus.io/port: "8080"
+      prometheus.io/path: "/metrics"
+
+  # Resource allocation
+  resources:
+    requests:
+      memory: "1Gi"
+      cpu: "1000m"
+    limits:
+      memory: "4Gi"
+      cpu: "4000m"
+
+  # Horizontal Pod Autoscaler
+  autoscaling:
+    enabled: true
+    minReplicas: 5
+    maxReplicas: 20
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+
+  # Liveness and readiness probes
+  livenessProbe:
+    httpGet:
+      path: /system/health
+      port: 8080
+    initialDelaySeconds: 60
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  readinessProbe:
+    httpGet:
+      path: /system/health
+      port: 8080
+    initialDelaySeconds: 30
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+  # Environment variables
+  env:
+    LOG_LEVEL: "INFO"
+    API_WORKERS: "8"
+    PROMETHEUS_ENABLED: "true"
+    ENVIRONMENT: "production"
+
+# ============================================================================
+# Redis Configuration
+# ============================================================================
+redis:
+  enabled: true
+
+  image:
+    repository: redis
+    tag: 7-alpine
+    pullPolicy: IfNotPresent
+
+  service:
+    type: ClusterIP
+    port: 6379
+
+  # Resource allocation
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "500m"
+    limits:
+      memory: "1Gi"
+      cpu: "1000m"
+
+  # Persistent storage
+  persistence:
+    enabled: true
+    size: 50Gi
+    accessMode: ReadWriteOnce
+    # Use high-performance storage class
+    storageClass: "gp3"
+
+  # Redis configuration
+  config: |
+    maxmemory 768mb
+    maxmemory-policy allkeys-lru
+    save 900 1
+    save 300 10
+    save 60 10000
+    appendonly yes
+    appendfsync everysec
+
+# ============================================================================
+# ChromaDB Configuration
+# ============================================================================
+chromadb:
+  enabled: true
+
+  image:
+    repository: chromadb/chroma
+    tag: latest
+    pullPolicy: IfNotPresent
+
+  service:
+    type: ClusterIP
+    port: 8000
+
+  # Resource allocation
+  resources:
+    requests:
+      memory: "1Gi"
+      cpu: "500m"
+    limits:
+      memory: "2Gi"
+      cpu: "2000m"
+
+  # Persistent storage
+  persistence:
+    enabled: true
+    size: 100Gi
+    accessMode: ReadWriteOnce
+    storageClass: "gp3"
+
+  # Environment variables
+  env:
+    CHROMA_SERVER_HOST: "0.0.0.0"
+    CHROMA_SERVER_HTTP_PORT: "8000"
+    ANONYMIZED_TELEMETRY: "False"
+    ALLOW_RESET: "False"  # Disable reset in production
+    IS_PERSISTENT: "True"
+
+# ============================================================================
+# Ingress Configuration
+# ============================================================================
+ingress:
+  enabled: true
+  className: "nginx"
+
+  annotations:
+    # TLS/SSL
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+
+    # Rate limiting
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/limit-rps: "10"
+
+    # Security headers
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      more_set_headers "X-Frame-Options: DENY";
+      more_set_headers "X-Content-Type-Options: nosniff";
+      more_set_headers "X-XSS-Protection: 1; mode=block";
+      more_set_headers "Referrer-Policy: strict-origin-when-cross-origin";
+
+    # Performance
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+
+  hosts:
+    - host: api.mae.production.com
+      paths:
+        - path: /
+          pathType: Prefix
+
+  tls:
+    - secretName: mae-production-tls
+      hosts:
+        - api.mae.production.com
+
+# ============================================================================
+# Security Configuration
+# ============================================================================
+security:
+  # JWT configuration
+  jwt:
+    algorithm: "HS256"
+    accessTokenExpireMinutes: 30
+
+  # !!! CRITICAL: Generate strong secret key !!!
+  # Run: python -c "import secrets; print(secrets.token_hex(32))"
+  secretKey: ""  # Use existing secret: mae-production-secrets
+  existingSecret: "mae-production-secrets"
+
+  # Service account
+  serviceAccount:
+    create: true
+    name: "mae-service-account"
+    annotations:
+      # EKS IAM role annotation
+      eks.amazonaws.com/role-arn: "arn:aws:iam::123456789012:role/mae-prod-role"
+
+  # RBAC
+  rbac:
+    create: true
+
+# ============================================================================
+# Monitoring Configuration
+# ============================================================================
+monitoring:
+  # Prometheus metrics
+  prometheus:
+    enabled: true
+    port: 9090
+    scrapeInterval: "15s"
+
+  # Grafana dashboards
+  grafana:
+    enabled: true
+    port: 3000
+
+  # Jaeger tracing
+  jaeger:
+    enabled: true
+    samplingRate: 0.1  # 10% sampling in production
+
+# ============================================================================
+# Network Policies
+# ============================================================================
+networkPolicy:
+  enabled: true
+  policyTypes:
+    - Ingress
+    - Egress
+
+  # Ingress rules
+  ingress:
+    - from:
+      - namespaceSelector:
+          matchLabels:
+            name: ingress-nginx
+      ports:
+      - protocol: TCP
+        port: 8080
+
+  # Egress rules
+  egress:
+    # Allow DNS
+    - to:
+      - namespaceSelector: {}
+        podSelector:
+          matchLabels:
+            k8s-app: kube-dns
+      ports:
+      - protocol: UDP
+        port: 53
+    # Allow Redis
+    - to:
+      - podSelector:
+          matchLabels:
+            app: redis
+      ports:
+      - protocol: TCP
+        port: 6379
+    # Allow ChromaDB
+    - to:
+      - podSelector:
+          matchLabels:
+            app: chromadb
+      ports:
+      - protocol: TCP
+        port: 8000
+    # Allow external HTTPS (for external APIs)
+    - to:
+      - namespaceSelector: {}
+      ports:
+      - protocol: TCP
+        port: 443
+
+# ============================================================================
+# Pod Security
+# ============================================================================
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false  # Set to true if possible
+  capabilities:
+    drop:
+      - ALL
+
+# ============================================================================
+# Affinity and Tolerations
+# ============================================================================
+affinity:
+  # Pod anti-affinity to spread across nodes
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - mae
+          topologyKey: kubernetes.io/hostname
+
+  # Node affinity for specific node pools
+  nodeAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        preference:
+          matchExpressions:
+            - key: workload-type
+              operator: In
+              values:
+                - compute-intensive
+
+tolerations:
+  - key: "compute-intensive"
+    operator: "Equal"
+    value: "true"
+    effect: "NoSchedule"
+
+nodeSelector: {}
+  # Use if you have dedicated node pools
+  # workload-type: mae-production
+
+# ============================================================================
+# Pod Disruption Budget
+# ============================================================================
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 3  # Always keep at least 3 pods running
+
+# ============================================================================
+# Additional Configuration
+# ============================================================================
+
+# Pod annotations
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8080"
+  prometheus.io/path: "/metrics"
+
+# Pod labels
+podLabels:
+  environment: production
+  version: v1.0.0
+
+# Priority class for critical workloads
+priorityClassName: high-priority
+
+# Init containers
+initContainers:
+  - name: wait-for-redis
+    image: busybox:1.36
+    command:
+      - sh
+      - -c
+      - |
+        until nc -z redis-service 6379; do
+          echo "Waiting for Redis..."
+          sleep 2
+        done
+        echo "Redis is ready!"
+  - name: wait-for-chromadb
+    image: busybox:1.36
+    command:
+      - sh
+      - -c
+      - |
+        until nc -z chromadb-service 8000; do
+          echo "Waiting for ChromaDB..."
+          sleep 2
+        done
+        echo "ChromaDB is ready!"
+
+# Lifecycle hooks
+lifecycle:
+  preStop:
+    exec:
+      command:
+        - /bin/sh
+        - -c
+        - sleep 15  # Allow time for load balancer to drain connections
+
+# ============================================================================
+# Backup Configuration
+# ============================================================================
+backup:
+  enabled: true
+  schedule: "0 2 * * *"  # Daily at 2 AM
+  retention: 30  # Keep 30 days of backups
+
+  # Velero annotations for backup
+  annotations:
+    backup.velero.io/backup-volumes: redis-data,chroma-data

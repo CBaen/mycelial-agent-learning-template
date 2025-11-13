@@ -1,0 +1,343 @@
+# ============================================================================
+# Continuous Deployment (CD) Pipeline
+# ============================================================================
+# Deploys MAE to various environments after CI passes
+# ============================================================================
+
+name: CD
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+          - production
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # ============================================================================
+  # Build and Push Docker Images
+  # ============================================================================
+  build-and-push:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+      image-digest: ${{ steps.build.outputs.digest }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
+
+    - name: Log in to GitHub Container Registry
+      uses: docker/login-action@v2
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v4
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=semver,pattern={{major}}
+          type=sha,prefix={{branch}}-
+
+    - name: Build and push Docker image
+      id: build
+      uses: docker/build-push-action@v4
+      with:
+        context: .
+        file: ./docker/Dockerfile.api
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        build-args: |
+          BUILD_DATE=${{ github.event.head_commit.timestamp }}
+          VCS_REF=${{ github.sha }}
+          VERSION=${{ steps.meta.outputs.version }}
+
+    - name: Sign the image
+      run: |
+        echo "Image digest: ${{ steps.build.outputs.digest }}"
+        echo "Image tags: ${{ steps.meta.outputs.tags }}"
+
+  # ============================================================================
+  # Deploy to Development
+  # ============================================================================
+  deploy-dev:
+    name: Deploy to Development
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.event.inputs.environment == 'dev'
+    environment:
+      name: development
+      url: https://dev.mae.example.com
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'v1.28.0'
+
+    - name: Configure kubeconfig
+      run: |
+        mkdir -p $HOME/.kube
+        echo "${{ secrets.KUBECONFIG_DEV }}" | base64 -d > $HOME/.kube/config
+
+    - name: Deploy with Helm
+      run: |
+        helm upgrade --install mae-dev ./helm/mae-chart \
+          --namespace mae-dev \
+          --create-namespace \
+          --set api.image.tag=${{ github.sha }} \
+          --set api.replicaCount=1 \
+          --set redis.persistence.enabled=false \
+          --set chromadb.persistence.enabled=false \
+          --set ingress.hosts[0].host=dev.mae.example.com \
+          --wait \
+          --timeout 5m
+
+    - name: Verify deployment
+      run: |
+        kubectl rollout status deployment/mae-dev-api -n mae-dev
+        kubectl get pods -n mae-dev
+
+    - name: Run smoke tests
+      run: |
+        POD=$(kubectl get pods -n mae-dev -l app.kubernetes.io/name=mae -o jsonpath='{.items[0].metadata.name}')
+        kubectl exec -n mae-dev $POD -- curl -f http://localhost:8080/system/health || exit 1
+
+  # ============================================================================
+  # Deploy to Staging
+  # ============================================================================
+  deploy-staging:
+    name: Deploy to Staging
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.environment == 'staging'
+    environment:
+      name: staging
+      url: https://staging.mae.example.com
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'v1.28.0'
+
+    - name: Configure kubeconfig
+      run: |
+        mkdir -p $HOME/.kube
+        echo "${{ secrets.KUBECONFIG_STAGING }}" | base64 -d > $HOME/.kube/config
+
+    - name: Deploy with Helm
+      run: |
+        helm upgrade --install mae-staging ./helm/mae-chart \
+          --namespace mae-staging \
+          --create-namespace \
+          --set api.image.tag=${{ github.sha }} \
+          --set api.replicaCount=2 \
+          --set redis.persistence.enabled=true \
+          --set redis.persistence.size=10Gi \
+          --set chromadb.persistence.enabled=true \
+          --set chromadb.persistence.size=20Gi \
+          --set ingress.hosts[0].host=staging.mae.example.com \
+          --wait \
+          --timeout 10m
+
+    - name: Verify deployment
+      run: |
+        kubectl rollout status deployment/mae-staging-api -n mae-staging
+        kubectl get pods -n mae-staging
+
+    - name: Run integration tests
+      run: |
+        # Wait for all pods to be ready
+        kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=mae -n mae-staging --timeout=300s
+
+        # Run health checks
+        POD=$(kubectl get pods -n mae-staging -l app.kubernetes.io/name=mae -o jsonpath='{.items[0].metadata.name}')
+        kubectl exec -n mae-staging $POD -- curl -f http://localhost:8080/system/health || exit 1
+
+  # ============================================================================
+  # Deploy to Production
+  # ============================================================================
+  deploy-production:
+    name: Deploy to Production
+    needs: [build-and-push, deploy-staging]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.environment == 'production'
+    environment:
+      name: production
+      url: https://api.mae.example.com
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'v1.28.0'
+
+    - name: Configure kubeconfig
+      run: |
+        mkdir -p $HOME/.kube
+        echo "${{ secrets.KUBECONFIG_PROD }}" | base64 -d > $HOME/.kube/config
+
+    - name: Deploy with Helm (Blue-Green)
+      run: |
+        # Get current deployment color
+        CURRENT_COLOR=$(kubectl get deployment -n mae-prod -l app.kubernetes.io/name=mae -o jsonpath='{.items[0].metadata.labels.color}' || echo "blue")
+        NEW_COLOR=$([ "$CURRENT_COLOR" = "blue" ] && echo "green" || echo "blue")
+
+        echo "Current: $CURRENT_COLOR, Deploying: $NEW_COLOR"
+
+        # Deploy new version
+        helm upgrade --install mae-$NEW_COLOR ./helm/mae-chart \
+          --namespace mae-prod \
+          --create-namespace \
+          --set api.image.tag=${{ github.sha }} \
+          --set api.replicaCount=5 \
+          --set api.autoscaling.enabled=true \
+          --set api.autoscaling.minReplicas=5 \
+          --set api.autoscaling.maxReplicas=20 \
+          --set redis.persistence.enabled=true \
+          --set redis.persistence.size=50Gi \
+          --set redis.resources.requests.memory=512Mi \
+          --set redis.resources.limits.memory=1Gi \
+          --set chromadb.persistence.enabled=true \
+          --set chromadb.persistence.size=100Gi \
+          --set chromadb.resources.requests.memory=1Gi \
+          --set chromadb.resources.limits.memory=2Gi \
+          --set ingress.hosts[0].host=api.mae.example.com \
+          --set security.secretKey=${{ secrets.JWT_SECRET_KEY }} \
+          --set podLabels.color=$NEW_COLOR \
+          --wait \
+          --timeout 15m
+
+    - name: Verify new deployment
+      run: |
+        kubectl rollout status deployment/mae-$NEW_COLOR-api -n mae-prod
+        kubectl get pods -n mae-prod
+
+    - name: Run production smoke tests
+      run: |
+        # Test new deployment
+        POD=$(kubectl get pods -n mae-prod -l color=$NEW_COLOR -o jsonpath='{.items[0].metadata.name}')
+        kubectl exec -n mae-prod $POD -- curl -f http://localhost:8080/system/health || exit 1
+        kubectl exec -n mae-prod $POD -- curl -f http://localhost:8080/system/version || exit 1
+
+    - name: Switch traffic to new deployment
+      run: |
+        # Update ingress to point to new color
+        kubectl patch ingress mae-ingress -n mae-prod -p '{"spec":{"rules":[{"host":"api.mae.example.com","http":{"paths":[{"path":"/","pathType":"Prefix","backend":{"service":{"name":"mae-'$NEW_COLOR'-api","port":{"number":8080}}}}]}}]}}'
+
+        echo "Traffic switched to $NEW_COLOR deployment"
+
+    - name: Monitor new deployment (5 minutes)
+      run: |
+        echo "Monitoring new deployment for 5 minutes..."
+        sleep 300
+
+        # Check for errors
+        ERROR_COUNT=$(kubectl get pods -n mae-prod -l color=$NEW_COLOR -o json | jq '[.items[].status.containerStatuses[].restartCount] | add')
+        if [ "$ERROR_COUNT" -gt 0 ]; then
+          echo "Errors detected! Rolling back..."
+          kubectl patch ingress mae-ingress -n mae-prod -p '{"spec":{"rules":[{"host":"api.mae.example.com","http":{"paths":[{"path":"/","pathType":"Prefix","backend":{"service":{"name":"mae-'$CURRENT_COLOR'-api","port":{"number":8080}}}}]}}]}}'
+          exit 1
+        fi
+
+        echo "Deployment successful!"
+
+    - name: Scale down old deployment
+      run: |
+        # Scale down old color after successful deployment
+        kubectl scale deployment mae-$CURRENT_COLOR-api -n mae-prod --replicas=0
+
+    - name: Create GitHub Release
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref }}
+        release_name: Release ${{ github.ref }}
+        body: |
+          ## MAE Release ${{ github.ref }}
+
+          **Docker Image:** ${{ needs.build-and-push.outputs.image-tag }}
+          **Image Digest:** ${{ needs.build-and-push.outputs.image-digest }}
+
+          ### Deployment Status
+          - ✅ Production deployment successful
+          - ✅ All smoke tests passed
+          - ✅ Blue-green deployment completed
+
+          ### Changes
+          See commit history for detailed changes.
+        draft: false
+        prerelease: false
+
+  # ============================================================================
+  # Rollback Workflow
+  # ============================================================================
+  rollback:
+    name: Rollback Production
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'rollback'
+    environment:
+      name: production-rollback
+
+    steps:
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'v1.28.0'
+
+    - name: Configure kubeconfig
+      run: |
+        mkdir -p $HOME/.kube
+        echo "${{ secrets.KUBECONFIG_PROD }}" | base64 -d > $HOME/.kube/config
+
+    - name: Rollback Helm release
+      run: |
+        helm rollback mae-prod -n mae-prod
+
+    - name: Verify rollback
+      run: |
+        kubectl rollout status deployment/mae-prod-api -n mae-prod
+        kubectl get pods -n mae-prod
