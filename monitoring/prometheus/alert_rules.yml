@@ -1,0 +1,186 @@
+groups:
+  - name: mae_agent_alerts
+    interval: 30s
+    rules:
+      # Agent Performance Alerts
+      - alert: AgentLowConvergence
+        expr: mae_agent_convergence_score < 0.3
+        for: 5m
+        labels:
+          severity: warning
+          component: agent
+        annotations:
+          summary: "Agent {{ $labels.agent_id }} has low convergence"
+          description: "Agent {{ $labels.agent_id }} convergence score is {{ $value | humanizePercentage }}, below 30% threshold for 5 minutes"
+
+      - alert: AgentLowSatisfaction
+        expr: mae_agent_satisfaction < 0.5
+        for: 5m
+        labels:
+          severity: warning
+          component: agent
+        annotations:
+          summary: "Agent {{ $labels.agent_id }} has low satisfaction"
+          description: "Agent {{ $labels.agent_id }} satisfaction is {{ $value | humanizePercentage }}, below 50% threshold"
+
+      - alert: AgentStoppedLearning
+        expr: rate(mae_agent_learning_steps_total[5m]) == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: agent
+        annotations:
+          summary: "Agent {{ $labels.agent_id }} stopped learning"
+          description: "Agent {{ $labels.agent_id }} has not performed any learning steps in the last 2 minutes"
+
+  - name: mae_system_alerts
+    interval: 30s
+    rules:
+      # System Health Alerts
+      - alert: HighCPUUsage
+        expr: mae_system_cpu_percent > 80
+        for: 5m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "High CPU usage detected"
+          description: "CPU usage is {{ $value }}%, above 80% threshold for 5 minutes"
+
+      - alert: CriticalCPUUsage
+        expr: mae_system_cpu_percent > 95
+        for: 2m
+        labels:
+          severity: critical
+          component: system
+        annotations:
+          summary: "Critical CPU usage detected"
+          description: "CPU usage is {{ $value }}%, above 95% threshold for 2 minutes"
+
+      - alert: HighMemoryUsage
+        expr: mae_system_memory_bytes > 8589934592  # 8GB
+        for: 5m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "High memory usage detected"
+          description: "Memory usage is {{ $value | humanize1024 }}, above 8GB threshold"
+
+      - alert: HighErrorRate
+        expr: rate(mae_system_errors_total[5m]) > 1
+        for: 2m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "High error rate detected"
+          description: "Error rate is {{ $value }} errors/sec for error type {{ $labels.error_type }}"
+
+      - alert: CriticalErrorRate
+        expr: rate(mae_system_errors_total[5m]) > 10
+        for: 1m
+        labels:
+          severity: critical
+          component: system
+        annotations:
+          summary: "Critical error rate detected"
+          description: "Error rate is {{ $value }} errors/sec for error type {{ $labels.error_type }}, above 10/sec threshold"
+
+      - alert: HighRequestLatency
+        expr: histogram_quantile(0.99, rate(mae_system_request_latency_seconds_bucket[5m])) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "High request latency for {{ $labels.operation }}"
+          description: "p99 latency is {{ $value }}s for operation {{ $labels.operation }}, above 500ms threshold"
+
+  - name: mae_communication_alerts
+    interval: 30s
+    rules:
+      # Communication Alerts
+      - alert: HighMessageLatency
+        expr: histogram_quantile(0.99, rate(mae_communication_message_latency_seconds_bucket[5m])) > 0.01
+        for: 5m
+        labels:
+          severity: warning
+          component: communication
+        annotations:
+          summary: "High message latency for {{ $labels.message_type }}"
+          description: "p99 message latency is {{ $value }}s for {{ $labels.message_type }}, above 10ms threshold"
+
+      - alert: LowRoutingEfficiency
+        expr: mae_communication_gnn_routing_efficiency < 0.6
+        for: 5m
+        labels:
+          severity: warning
+          component: communication
+        annotations:
+          summary: "Low GNN routing efficiency"
+          description: "GNN routing efficiency is {{ $value | humanizePercentage }}, below 60% threshold"
+
+      - alert: CriticalRoutingEfficiency
+        expr: mae_communication_gnn_routing_efficiency < 0.4
+        for: 2m
+        labels:
+          severity: critical
+          component: communication
+        annotations:
+          summary: "Critical GNN routing efficiency"
+          description: "GNN routing efficiency is {{ $value | humanizePercentage }}, below 40% threshold"
+
+      - alert: NoMessagesFlowing
+        expr: rate(mae_communication_messages_sent_total[5m]) == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: communication
+        annotations:
+          summary: "No messages being sent"
+          description: "No messages have been sent in the last 2 minutes, communication may be stalled"
+
+  - name: mae_memory_alerts
+    interval: 30s
+    rules:
+      # Memory Subsystem Alerts
+      - alert: BufferNearlyFull
+        expr: (mae_memory_episodic_buffer_size / mae_memory_episodic_buffer_capacity) > 0.9
+        for: 5m
+        labels:
+          severity: warning
+          component: memory
+        annotations:
+          summary: "Episodic buffer nearly full for {{ $labels.agent_id }}"
+          description: "Buffer utilization is {{ $value | humanizePercentage }} for agent {{ $labels.agent_id }}, above 90% threshold"
+
+      - alert: BufferFull
+        expr: mae_memory_episodic_buffer_size == mae_memory_episodic_buffer_capacity
+        for: 2m
+        labels:
+          severity: critical
+          component: memory
+        annotations:
+          summary: "Episodic buffer full for {{ $labels.agent_id }}"
+          description: "Buffer is at 100% capacity for agent {{ $labels.agent_id }}, experiences may be dropped"
+
+      - alert: NoReplayActivity
+        expr: rate(mae_memory_replay_total[10m]) == 0
+        for: 5m
+        labels:
+          severity: warning
+          component: memory
+        annotations:
+          summary: "No replay activity for {{ $labels.agent_id }}"
+          description: "Agent {{ $labels.agent_id }} has not performed memory replay in 5 minutes"
+
+      - alert: HighMemoryPressure
+        expr: count(mae_memory_episodic_buffer_size / mae_memory_episodic_buffer_capacity > 0.8) > 5
+        for: 5m
+        labels:
+          severity: warning
+          component: memory
+        annotations:
+          summary: "High memory pressure across multiple agents"
+          description: "{{ $value }} agents have buffer utilization above 80%"
