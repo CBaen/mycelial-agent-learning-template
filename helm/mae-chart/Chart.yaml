@@ -1,0 +1,35 @@
+# ============================================================================
+# MAE Helm Chart Metadata
+# ============================================================================
+apiVersion: v2
+name: mae
+description: Mycelial Agent Engine - Multi-agent learning system with collective memory
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+
+keywords:
+  - agents
+  - machine-learning
+  - distributed-systems
+  - redis
+  - vector-database
+
+home: https://github.com/yourusername/mae
+sources:
+  - https://github.com/yourusername/mae
+
+maintainers:
+  - name: MAE Team
+    email: team@mae-project.com
+
+# Dependencies (optional - if using external charts)
+# dependencies:
+#   - name: redis
+#     version: "17.x.x"
+#     repository: "https://charts.bitnami.com/bitnami"
+#     condition: redis.enabled
+#   - name: prometheus
+#     version: "25.x.x"
+#     repository: "https://prometheus-community.github.io/helm-charts"
+#     condition: monitoring.prometheus.enabled

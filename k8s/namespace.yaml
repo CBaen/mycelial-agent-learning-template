@@ -1,0 +1,11 @@
+# ============================================================================
+# MAE Kubernetes Namespace
+# ============================================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mae
+  labels:
+    name: mae
+    app: mae
+    environment: production

@@ -1,0 +1,294 @@
+# ============================================================================
+# MAE Helm Chart Values
+# ============================================================================
+# Default values for MAE deployment
+# Override these values by creating a custom values file:
+#   helm install mae ./mae-chart -f custom-values.yaml
+# ============================================================================
+
+# ============================================================================
+# Global Settings
+# ============================================================================
+global:
+  # Image pull secret for private registries
+  imagePullSecrets: []
+  # Storage class for persistent volumes
+  storageClass: "standard"
+
+# ============================================================================
+# MAE API Configuration
+# ============================================================================
+api:
+  # Container image
+  image:
+    repository: mae-api
+    tag: latest
+    pullPolicy: IfNotPresent
+
+  # Number of replicas
+  replicaCount: 2
+
+  # Service configuration
+  service:
+    type: ClusterIP
+    port: 8080
+    annotations: {}
+
+  # Resource limits
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "500m"
+    limits:
+      memory: "2Gi"
+      cpu: "2000m"
+
+  # Horizontal Pod Autoscaler
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+
+  # Probes
+  livenessProbe:
+    httpGet:
+      path: /system/health
+      port: 8080
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  readinessProbe:
+    httpGet:
+      path: /system/health
+      port: 8080
+    initialDelaySeconds: 10
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+  # Environment variables
+  env:
+    LOG_LEVEL: "INFO"
+    API_WORKERS: "4"
+    PROMETHEUS_ENABLED: "true"
+
+# ============================================================================
+# Redis Configuration
+# ============================================================================
+redis:
+  enabled: true
+
+  image:
+    repository: redis
+    tag: 7-alpine
+    pullPolicy: IfNotPresent
+
+  service:
+    type: ClusterIP
+    port: 6379
+
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "250m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+
+  # Persistent storage
+  persistence:
+    enabled: true
+    size: 10Gi
+    accessMode: ReadWriteOnce
+
+# ============================================================================
+# ChromaDB Configuration
+# ============================================================================
+chromadb:
+  enabled: true
+
+  image:
+    repository: chromadb/chroma
+    tag: latest
+    pullPolicy: IfNotPresent
+
+  service:
+    type: ClusterIP
+    port: 8000
+
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "250m"
+    limits:
+      memory: "1Gi"
+      cpu: "1000m"
+
+  # Persistent storage
+  persistence:
+    enabled: true
+    size: 20Gi
+    accessMode: ReadWriteOnce
+
+  # Environment variables
+  env:
+    CHROMA_SERVER_HOST: "0.0.0.0"
+    CHROMA_SERVER_HTTP_PORT: "8000"
+    ANONYMIZED_TELEMETRY: "False"
+    ALLOW_RESET: "True"
+    IS_PERSISTENT: "True"
+
+# ============================================================================
+# Ingress Configuration
+# ============================================================================
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+
+  hosts:
+    - host: api.mae.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+
+  tls:
+    - secretName: mae-tls-cert
+      hosts:
+        - api.mae.example.com
+
+# ============================================================================
+# Security Configuration
+# ============================================================================
+security:
+  # JWT configuration
+  jwt:
+    algorithm: "HS256"
+    accessTokenExpireMinutes: 30
+
+  # Secret key (OVERRIDE THIS IN PRODUCTION!)
+  # Generate with: python -c "import secrets; print(secrets.token_hex(32))"
+  secretKey: "change-me-in-production-please-use-strong-random-key"
+
+  # Service account
+  serviceAccount:
+    create: true
+    name: "mae-service-account"
+    annotations: {}
+
+  # RBAC
+  rbac:
+    create: true
+
+# ============================================================================
+# Monitoring Configuration
+# ============================================================================
+monitoring:
+  # Prometheus metrics
+  prometheus:
+    enabled: true
+    port: 9090
+    scrapeInterval: "15s"
+
+  # Grafana dashboards
+  grafana:
+    enabled: false
+    port: 3000
+
+  # Jaeger tracing
+  jaeger:
+    enabled: false
+
+# ============================================================================
+# Network Policies
+# ============================================================================
+networkPolicy:
+  enabled: false
+  policyTypes:
+    - Ingress
+    - Egress
+
+# ============================================================================
+# Pod Security
+# ============================================================================
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop:
+      - ALL
+
+# ============================================================================
+# Affinity and Tolerations
+# ============================================================================
+affinity: {}
+  # Example: Run on specific nodes
+  # nodeAffinity:
+  #   requiredDuringSchedulingIgnoredDuringExecution:
+  #     nodeSelectorTerms:
+  #     - matchExpressions:
+  #       - key: node-type
+  #         operator: In
+  #         values:
+  #         - mae-workload
+
+tolerations: []
+  # Example: Tolerate specific taints
+  # - key: "mae-workload"
+  #   operator: "Equal"
+  #   value: "true"
+  #   effect: "NoSchedule"
+
+nodeSelector: {}
+  # Example: Select specific nodes
+  # node-type: mae-workload
+
+# ============================================================================
+# Additional Configuration
+# ============================================================================
+
+# Pod annotations
+podAnnotations: {}
+  # Example: Prometheus scraping
+  # prometheus.io/scrape: "true"
+  # prometheus.io/port: "8080"
+  # prometheus.io/path: "/metrics"
+
+# Pod labels
+podLabels: {}
+
+# Additional volumes
+extraVolumes: []
+
+# Additional volume mounts
+extraVolumeMounts: []
+
+# Init containers
+initContainers: []
+  # Example: Wait for dependencies
+  # - name: wait-for-redis
+  #   image: busybox:1.36
+  #   command: ['sh', '-c', 'until nc -z redis-service 6379; do echo waiting for redis; sleep 2; done;']
+
+# Sidecar containers
+sidecarContainers: []
+  # Example: Log aggregation
+  # - name: log-aggregator
+  #   image: fluent/fluent-bit:latest
+  #   volumeMounts:
+  #     - name: logs
+  #       mountPath: /app/logs

@@ -1,0 +1,39 @@
+# ============================================================================
+# MAE ConfigMap
+# ============================================================================
+# Non-sensitive configuration data
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mae-config
+  namespace: mae
+  labels:
+    app: mae
+data:
+  # Redis configuration
+  REDIS_HOST: "redis-service"
+  REDIS_PORT: "6379"
+  REDIS_DB: "0"
+
+  # Vector DB configuration
+  VECTOR_DB_BACKEND: "chromadb"
+  CHROMADB_HOST: "chromadb-service"
+  CHROMADB_PORT: "8000"
+
+  # API configuration
+  API_HOST: "0.0.0.0"
+  API_PORT: "8080"
+  API_WORKERS: "4"
+  API_DOCS_ENABLED: "true"
+
+  # JWT configuration
+  JWT_ALGORITHM: "HS256"
+  ACCESS_TOKEN_EXPIRE_MINUTES: "30"
+
+  # Monitoring
+  PROMETHEUS_ENABLED: "true"
+  LOG_LEVEL: "INFO"
+
+  # Application settings
+  PYTHONUNBUFFERED: "1"
+  MAE_CONFIG_PATH: "/app/config/config.yaml"

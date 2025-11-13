@@ -1,0 +1,82 @@
+🎉 MAE - Mycelial Agent Engine has been deployed!
+
+📋 Release Information:
+   Name:      {{ .Release.Name }}
+   Namespace: {{ .Release.Namespace }}
+   Version:   {{ .Chart.Version }}
+
+🔗 Access the API:
+
+{{- if .Values.ingress.enabled }}
+{{- range .Values.ingress.hosts }}
+   External: https://{{ .host }}
+{{- end }}
+{{- end }}
+
+   Internal: kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "mae.fullname" . }}-api 8080:8080
+
+📚 API Documentation:
+   http://localhost:8080/docs (after port-forward)
+
+📊 Deployment Status:
+
+   To check the status of your deployment:
+
+   kubectl get pods -n {{ .Release.Namespace }}
+   kubectl get svc -n {{ .Release.Namespace }}
+
+{{- if .Values.api.autoscaling.enabled }}
+   kubectl get hpa -n {{ .Release.Namespace }}
+{{- end }}
+
+📝 View Logs:
+
+   kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name={{ include "mae.name" . }} -f
+
+🔐 Security:
+{{- if eq .Values.security.secretKey "change-me-in-production-please-use-strong-random-key" }}
+
+   ⚠️  WARNING: You are using the default SECRET_KEY!
+
+   Generate a new secret key:
+   python3 -c "import secrets; print(secrets.token_hex(32))"
+
+   Then upgrade with:
+   helm upgrade {{ .Release.Name }} ./mae-chart --set security.secretKey=YOUR_NEW_KEY
+{{- end }}
+
+🎯 Next Steps:
+
+   1. Wait for pods to be ready:
+      kubectl wait --for=condition=ready pod -l app.kubernetes.io/name={{ include "mae.name" . }} -n {{ .Release.Namespace }} --timeout=300s
+
+   2. Test the health endpoint:
+      kubectl run -it --rm debug --image=curlimages/curl --restart=Never -n {{ .Release.Namespace }} -- \
+        curl http://{{ include "mae.fullname" . }}-api:8080/system/health
+
+   3. Create your first user (requires port-forward):
+      curl -X POST http://localhost:8080/auth/users \
+        -H "Content-Type: application/json" \
+        -d '{"username":"admin","password":"YourStrongPassword123"}'
+
+📖 Documentation:
+
+   Chart: helm/mae-chart/README.md
+   K8s:   k8s/README.md
+   API:   http://localhost:8080/docs
+
+💡 Helpful Commands:
+
+   # Scale API pods manually
+   kubectl scale deployment {{ include "mae.fullname" . }}-api -n {{ .Release.Namespace }} --replicas=5
+
+   # Update configuration
+   helm upgrade {{ .Release.Name }} ./mae-chart -f custom-values.yaml
+
+   # Rollback to previous version
+   helm rollback {{ .Release.Name }}
+
+   # Uninstall
+   helm uninstall {{ .Release.Name }} -n {{ .Release.Namespace }}
+
+✅ Happy Learning with MAE!

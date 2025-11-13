@@ -1,0 +1,51 @@
+# ============================================================================
+# MAE RBAC - Service Account and Permissions
+# ============================================================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mae-service-account
+  namespace: mae
+  labels:
+    app: mae
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: mae-role
+  namespace: mae
+  labels:
+    app: mae
+rules:
+  # Allow reading ConfigMaps
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
+  # Allow reading Secrets
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list"]
+  # Allow pod operations (for scaling)
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  # Allow service discovery
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: mae-role-binding
+  namespace: mae
+  labels:
+    app: mae
+subjects:
+  - kind: ServiceAccount
+    name: mae-service-account
+    namespace: mae
+roleRef:
+  kind: Role
+  name: mae-role
+  apiGroup: rbac.authorization.k8s.io
