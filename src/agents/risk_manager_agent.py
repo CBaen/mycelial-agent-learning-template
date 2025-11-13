@@ -10,8 +10,8 @@ from typing import Dict, Any, Optional, List, Set, Tuple
 import logging
 import numpy as np
 
-from agents.base_agent import MycelialAgent
-from core.haven_base import (
+from src.agents.base_agent import MycelialAgent
+from src.core.haven_base import (
     HavenRiskCoordinator,
     RiskLevel,
     ContagionStatus,

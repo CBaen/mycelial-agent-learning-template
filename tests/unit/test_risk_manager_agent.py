@@ -183,8 +183,10 @@ class TestRiskManagerAgentRiskAssessment:
             agent_id="test_agent",
             risk_level=RiskLevel.MODERATE,
             risk_score=0.55,
-            contributing_factors=["high_variance"],
-            recommended_intervention=InterventionType.MONITORING
+            contributing_factors={"high_variance": 0.3},
+            recommended_intervention=InterventionType.MONITORING,
+            timestamp=1234567890.0,
+            confidence=0.85
         )
         mock_haven_coordinator.assess_agent_risk.return_value = mock_risk_assessment
 
@@ -196,6 +198,10 @@ class TestRiskManagerAgentRiskAssessment:
 
     def test_assess_system_risk(self, agent, mock_haven_coordinator):
         """Test assessing overall system risk."""
+        # Register some agents so the check passes
+        agent.register_agent_for_monitoring("agent_1", {"performance_history": [0.8]})
+        agent.register_agent_for_monitoring("agent_2", {"performance_history": [0.6]})
+
         mock_haven_coordinator.assess_system_risk.return_value = 0.35
 
         risk = agent._assess_system_risk()
@@ -229,8 +235,10 @@ class TestRiskManagerAgentInterventions:
             agent_id="risky_agent",
             risk_level=RiskLevel.HIGH,
             risk_score=0.85,
-            contributing_factors=["erratic_behavior"],
-            recommended_intervention=InterventionType.ISOLATION
+            contributing_factors={"erratic_behavior": 0.5},
+            recommended_intervention=InterventionType.ISOLATION,
+            timestamp=1234567890.0,
+            confidence=0.9
         )
 
         success = agent._execute_intervention(
@@ -264,8 +272,10 @@ class TestRiskManagerAgentInterventions:
             agent_id="high_risk",
             risk_level=RiskLevel.CRITICAL,
             risk_score=0.95,
-            contributing_factors=["policy_corruption"],
-            recommended_intervention=InterventionType.ISOLATION
+            contributing_factors={"policy_corruption": 0.7},
+            recommended_intervention=InterventionType.ISOLATION,
+            timestamp=1234567890.0,
+            confidence=0.95
         )
 
         mock_haven_coordinator.recommend_intervention.return_value = InterventionType.ISOLATION
@@ -285,8 +295,10 @@ class TestRiskManagerAgentInterventions:
             agent_id="high_risk",
             risk_level=RiskLevel.HIGH,
             risk_score=0.82,
-            contributing_factors=[],
-            recommended_intervention=InterventionType.MONITORING
+            contributing_factors={},
+            recommended_intervention=InterventionType.MONITORING,
+            timestamp=1234567890.0,
+            confidence=0.85
         )
 
         mock_haven_coordinator.recommend_intervention.return_value = InterventionType.MONITORING
@@ -315,8 +327,10 @@ class TestRiskManagerAgentContagionDetection:
             contagion_status=ContagionStatus.HEALTHY,
             contagion_score=0.05,
             affected_agents=set(),
+            source_agents=set(),
             spread_rate=0.0,
-            containment_actions=[]
+            containment_actions=[],
+            timestamp=1234567890.0
         )
         mock_haven_coordinator.detect_policy_contagion.return_value = contagion_report
 
@@ -328,11 +342,13 @@ class TestRiskManagerAgentContagionDetection:
     def test_check_for_contagion_detected(self, agent, mock_haven_coordinator):
         """Test contagion detection and handling."""
         contagion_report = ContagionReport(
-            contagion_status=ContagionStatus.ACTIVE,
+            contagion_status=ContagionStatus.SPREADING,
             contagion_score=0.75,
             affected_agents={"agent_1", "agent_2", "agent_3"},
+            source_agents={"agent_1"},
             spread_rate=0.6,
-            containment_actions=[InterventionType.ISOLATION, InterventionType.ROLLBACK]
+            containment_actions=[InterventionType.ISOLATION, InterventionType.ROLLBACK],
+            timestamp=1234567890.0
         )
         mock_haven_coordinator.detect_policy_contagion.return_value = contagion_report
         mock_haven_coordinator.identify_contagion_source.return_value = [("agent_1", 0.9)]
@@ -349,8 +365,10 @@ class TestRiskManagerAgentContagionDetection:
             contagion_status=ContagionStatus.SPREADING,
             contagion_score=0.82,
             affected_agents={"agent_a", "agent_b"},
+            source_agents={"source_agent"},
             spread_rate=0.7,
-            containment_actions=[InterventionType.ISOLATION]
+            containment_actions=[InterventionType.ISOLATION],
+            timestamp=1234567890.0
         )
 
         mock_haven_coordinator.identify_contagion_source.return_value = [
@@ -389,8 +407,10 @@ class TestRiskManagerAgentMonitoring:
             agent_id="agent_0",
             risk_level=RiskLevel.LOW,
             risk_score=0.3,
-            contributing_factors=[],
-            recommended_intervention=InterventionType.NONE
+            contributing_factors={},
+            recommended_intervention=InterventionType.NONE,
+            timestamp=1234567890.0,
+            confidence=0.90
         )
         mock_haven_coordinator.assess_agent_risk.return_value = mock_risk_assessment
 
@@ -411,8 +431,10 @@ class TestRiskManagerAgentMonitoring:
             agent_id="high_risk_agent",
             risk_level=RiskLevel.HIGH,
             risk_score=0.88,
-            contributing_factors=["poor_performance"],
-            recommended_intervention=InterventionType.MONITORING
+            contributing_factors={"poor_performance": 0.7},
+            recommended_intervention=InterventionType.MONITORING,
+            timestamp=1234567890.0,
+            confidence=0.88
         )
         mock_haven_coordinator.assess_agent_risk.return_value = high_risk_assessment
 
@@ -453,8 +475,10 @@ class TestRiskManagerAgentAlerting:
             agent_id="problem_agent",
             risk_level=RiskLevel.CRITICAL,
             risk_score=0.92,
-            contributing_factors=["data_corruption"],
-            recommended_intervention=InterventionType.ISOLATION
+            contributing_factors={"data_corruption": 0.9},
+            recommended_intervention=InterventionType.ISOLATION,
+            timestamp=1234567890.0,
+            confidence=0.92
         )
 
         agent._publish_risk_alert(
@@ -471,11 +495,13 @@ class TestRiskManagerAgentAlerting:
     def test_publish_contagion_alert(self, agent, mock_redis_client):
         """Test publishing contagion alert."""
         contagion_report = ContagionReport(
-            contagion_status=ContagionStatus.ACTIVE,
+            contagion_status=ContagionStatus.SPREADING,
             contagion_score=0.8,
             affected_agents={"a1", "a2", "a3"},
+            source_agents={"source_1", "source_2"},
             spread_rate=0.65,
-            containment_actions=[InterventionType.ISOLATION]
+            containment_actions=[InterventionType.ISOLATION],
+            timestamp=1234567890.0
         )
         sources = [("source_1", 0.95), ("source_2", 0.85)]
 
@@ -531,8 +557,10 @@ class TestRiskManagerAgentLogging:
             agent_id="test_agent",
             risk_level=RiskLevel.MODERATE,
             risk_score=0.55,
-            contributing_factors=["factor1", "factor2"],
-            recommended_intervention=InterventionType.MONITORING
+            contributing_factors={"factor1": 0.3, "factor2": 0.25},
+            recommended_intervention=InterventionType.MONITORING,
+            timestamp=1234567890.0,
+            confidence=0.85
         )
 
         agent._log_risk_event("test_agent", risk_assessment)
@@ -551,8 +579,10 @@ class TestRiskManagerAgentLogging:
                 agent_id=f"agent_{i}",
                 risk_level=RiskLevel.LOW,
                 risk_score=0.2,
-                contributing_factors=[],
-                recommended_intervention=InterventionType.NONE
+                contributing_factors={},
+                recommended_intervention=InterventionType.NONE,
+                timestamp=1234567890.0,
+                confidence=0.95
             )
             agent._log_risk_event(f"agent_{i}", risk_assessment)
 
@@ -634,8 +664,10 @@ class TestRiskManagerAgentMetrics:
                 agent_id=f"agent_{i}",
                 risk_level=RiskLevel.LOW,
                 risk_score=0.2,
-                contributing_factors=[],
-                recommended_intervention=InterventionType.NONE
+                contributing_factors={},
+                recommended_intervention=InterventionType.NONE,
+                timestamp=1234567890.0,
+                confidence=0.95
             )
             agent._log_risk_event(f"agent_{i}", risk_assessment)
 

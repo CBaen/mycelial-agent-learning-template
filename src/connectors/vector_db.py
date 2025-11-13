@@ -18,6 +18,19 @@ from dataclasses import dataclass
 import logging
 import numpy as np
 
+# Optional dependencies - import at module level for easier mocking in tests
+try:
+    import chromadb
+    from chromadb.config import Settings as ChromaSettings
+except ImportError:
+    chromadb = None
+    ChromaSettings = None
+
+try:
+    from sklearn.cluster import KMeans
+except ImportError:
+    KMeans = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -320,12 +333,13 @@ class ChromaDBBackend(VectorDBInterface):
 
     def initialize(self):
         """Initialize ChromaDB connection and collection."""
-        try:
-            import chromadb
-            from chromadb.config import Settings
+        if chromadb is None:
+            logger.error("ChromaDB not installed. Run: pip install chromadb")
+            raise ImportError("ChromaDB is not installed")
 
+        try:
             # Create client
-            self.client = chromadb.Client(Settings(
+            self.client = chromadb.Client(ChromaSettings(
                 persist_directory=self.persist_directory,
                 anonymized_telemetry=False
             ))
@@ -339,9 +353,6 @@ class ChromaDBBackend(VectorDBInterface):
             self.is_initialized = True
             logger.info("ChromaDB collection '%s' initialized", self.collection_name)
 
-        except ImportError:
-            logger.error("ChromaDB not installed. Run: pip install chromadb")
-            raise
         except Exception as e:
             logger.error("Failed to initialize ChromaDB: %s", e)
             raise
@@ -558,9 +569,11 @@ class ChromaDBBackend(VectorDBInterface):
         if not self.is_initialized:
             self.initialize()
 
-        try:
-            from sklearn.cluster import KMeans
+        if KMeans is None:
+            logger.error("scikit-learn not installed. Run: pip install scikit-learn")
+            return {}
 
+        try:
             # Get all embeddings
             results = self.collection.get(
                 where=filter_criteria,
@@ -587,9 +600,6 @@ class ChromaDBBackend(VectorDBInterface):
 
             return clusters
 
-        except ImportError:
-            logger.error("scikit-learn not installed. Run: pip install scikit-learn")
-            return {}
         except Exception as e:
             logger.error("Error clustering policies: %s", e)
             return {}

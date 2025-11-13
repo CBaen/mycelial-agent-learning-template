@@ -282,7 +282,7 @@ class SimpleFRL(FederatedLearningEngine):
         self.total_receives += len(valid_updates)
 
         # Aggregate based on method
-        if self.aggregation_method == AggregationMethod.SIMPLE_AVERAGE:
+        if self.aggregation_method == AggregationMethod.FEDERATED_AVERAGING:
             return self._simple_average_aggregation(local_policy, valid_updates)
 
         elif self.aggregation_method == AggregationMethod.WEIGHTED_AVERAGE:

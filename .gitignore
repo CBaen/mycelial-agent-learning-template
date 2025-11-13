@@ -49,6 +49,7 @@ env/
 .DS_Store
 *.sublime-project
 *.sublime-workspace
+.claude/settings.local.json
 
 # ============================================================================
 # MAE Data and Logs
@@ -85,6 +86,7 @@ secrets/
 # ============================================================================
 .pytest_cache/
 .coverage
+coverage.xml
 htmlcov/
 .tox/
 .hypothesis/
