@@ -21,19 +21,25 @@ from .training import (
 from .metrics import (
     MetricsQuery,
     MetricsResponse,
-    SystemMetrics
+    SystemMetrics,
+    MetricType,
+    TimeRange
 )
 
 from .policies import (
     PolicyExport,
     PolicyImport,
-    PolicyCompare
+    PolicyCompare,
+    PolicyMetadata
 )
 
 from .system import (
     HealthResponse,
     VersionResponse,
-    SystemStats
+    SystemStats,
+    HealthStatus,
+    ComponentHealth,
+    ResourceUsage
 )
 
 __all__ = [
@@ -51,12 +57,18 @@ __all__ = [
     "MetricsQuery",
     "MetricsResponse",
     "SystemMetrics",
+    "MetricType",
+    "TimeRange",
     # Policies
     "PolicyExport",
     "PolicyImport",
     "PolicyCompare",
+    "PolicyMetadata",
     # System
     "HealthResponse",
     "VersionResponse",
     "SystemStats",
+    "HealthStatus",
+    "ComponentHealth",
+    "ResourceUsage",
 ]
