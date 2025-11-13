@@ -1,6 +1,11 @@
-# Mycelial Agent Engine (MAE) Template
+# Mycelial Agent Engine (MAE) v3
 
-**MAE** is a generic, production-ready framework for building **decentralized, resilient, and self-learning multi-agent systems**. It is based on a "mycelial" P2P learning architecture that avoids the single points of failure found in traditional hierarchical systems.
+![Version](https://img.shields.io/badge/version-3.0-blue.svg)
+![Status](https://img.shields.io/badge/status-production--ready-green.svg)
+![Python](https://img.shields.io/badge/python-3.8%2B-blue.svg)
+![License](https://img.shields.io/badge/license-MIT-green.svg)
+
+**MAE v3** is a production-ready framework for building **decentralized, resilient, and self-learning multi-agent systems**. It is based on a "mycelial" P2P learning architecture that avoids the single points of failure found in traditional hierarchical systems.
 
 Unlike conventional multi-agent frameworks that rely on centralized coordination, MAE implements a **fungal-network-inspired architecture** where:
 - Agents share knowledge peer-to-peer (no central server bottleneck)
@@ -13,9 +18,13 @@ Unlike conventional multi-agent frameworks that rely on centralized coordination
 ## Quick Links
 
 - **[PILLARS.md](PILLARS.md)** - 7 Pillars Fundamentals Guide (START HERE)
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** - Complete system architecture
+- **[QUICKSTART.md](QUICKSTART.md)** - Get started in 5 minutes
+- **[Big Rock Plans](docs/big-rocks/)** - Feature implementation plans (all completed)
+- **[API Documentation](docs/api-guides/)** - Comprehensive API guides
+- **[Deployment Guide](docs/deployment/)** - Production deployment instructions
 - **[Reference Implementations](src/implementations/)** - SimpleFRL, SimpleVDN, SimpleHAVEN
 - **[Examples](examples/)** - Complete domain-specific implementations
-- **[Requirements](requirements.txt)** - Installation dependencies
 
 ---
 
@@ -104,7 +113,7 @@ Lightweight oversight layer that prevents "policy contagion" (bad policies sprea
 
 ## Key Features
 
-### Core Capabilities
+### Core Capabilities (v3 Complete)
 - ✅ **Decentralized Learning**: No central coordinator required
 - ✅ **Redis-Backed**: All state, communication, and data flow through Redis
 - ✅ **Byzantine Resilient**: Trust-based peer selection and validation
@@ -112,17 +121,32 @@ Lightweight oversight layer that prevents "policy contagion" (bad policies sprea
 - ✅ **Production-Ready**: State persistence, error handling, graceful shutdown
 - ✅ **Adversarial Testing**: Built-in framework for safety validation
 
+### Advanced Features (v3)
+- ✅ **Electrical Signaling**: Sub-millisecond critical event propagation
+- ✅ **Stigmergy**: Environmental coordination via pheromone-like markers
+- ✅ **GNN Communication**: Graph neural network-based message passing
+- ✅ **Transfer Learning**: Cross-task knowledge transfer with meta-learning
+- ✅ **Episodic Memory**: Experience replay with priority sampling
+- ✅ **Vector Memory**: ChromaDB-powered semantic memory storage
+- ✅ **Prometheus Monitoring**: Production-grade observability
+- ✅ **Security Hardening**: JWT authentication, RBAC, TLS
+- ✅ **Cloud-Native**: Kubernetes/Helm deployment with CI/CD
+
 ### Technical Stack
-- **Mesa**: Agent-based modeling framework
-- **Redis**: Distributed data backbone (Streams, Pub/Sub, KV)
-- **Python 3.8+**: Core implementation language
-- **NumPy**: Numerical computations
+- **Core**: Python 3.8+, Mesa, NumPy
+- **Communication**: Redis (Streams, Pub/Sub, KV), Electrical Signaling
+- **Memory**: ChromaDB (vector storage), Episodic buffers
+- **ML**: PyTorch, PyTorch Geometric (GNN)
+- **Deployment**: Docker, Kubernetes, Helm
+- **Monitoring**: Prometheus, Grafana, Jaeger
+- **Security**: JWT, RBAC, TLS/SSL
 
 ### Scalability
 - Horizontal scaling via Redis clustering
 - Agents can be distributed across multiple machines
 - Lightweight coordination overhead
 - Supports 10s to 1000s of agents
+- Multi-platform container support (amd64, arm64)
 
 ---
 

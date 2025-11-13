@@ -48,8 +48,8 @@ Implemented ultra-fast sub-millisecond signaling system inspired by mycelial act
 - ✅ Performance monitoring and metrics
 - ✅ Integration with base_agent.py (+300 lines)
 - ✅ Comprehensive test suite (29 tests, 89% coverage)
-- ✅ Complete API documentation (BIG_ROCK_5_API_GUIDE.md)
-- ✅ Implementation plan (BIG_ROCK_5_ELECTRICAL_SIGNALING_PLAN.md)
+- ✅ Complete API documentation (docs/api-guides/BIG_ROCK_5_API_GUIDE.md)
+- ✅ Implementation plan (docs/big-rocks/BIG_ROCK_5_ELECTRICAL_SIGNALING_PLAN.md)
 
 **Performance Achieved:**
 - Latency: 0.42ms avg, 0.89ms p99 (✅ Target: <1ms)
@@ -143,7 +143,7 @@ Implemented transfer learning and MAML meta-learning for 10-100x learning speed-
   - `store_episode_for_transfer()` - Episode storage
   - `evaluate_transfer_performance()` - Performance tracking
   - Transfer and MAML statistics methods
-- ✅ Complete implementation plan (BIG_ROCK_8_TRANSFER_LEARNING_PLAN.md, 800+ lines)
+- ✅ Complete implementation plan (docs/big-rocks/BIG_ROCK_8_TRANSFER_LEARNING_PLAN.md, 800+ lines)
 - ✅ Test suite (40+ tests implemented)
 - ✅ Performance validation experiments
 
@@ -904,7 +904,7 @@ Implement Kubernetes deployment with Helm charts, essential documentation, and d
 - **Git Commits**: To be committed
 - **Status**: 100% Complete ✅✅✅
 
-**See**: `BIG_ROCK_14_PLAN.md` for original implementation plan
+**See**: `docs/big-rocks/BIG_ROCK_14_PLAN.md` for original implementation plan
 
 ---
 
