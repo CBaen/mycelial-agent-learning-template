@@ -51,7 +51,9 @@ class MockHavenCoordinator(HavenRiskCoordinator):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.assessments = {}
-        self.monitored_agents = {}
+        # Override monitored_agents to keep it as a set (base class initializes it)
+        # We'll track monitoring status separately
+        self.agent_status = {}  # Track active/isolated status
 
     def assess_agent_risk(self, agent_id, policy_state, recent_performance, behavioral_metrics=None):
         if not recent_performance:
@@ -69,18 +71,28 @@ class MockHavenCoordinator(HavenRiskCoordinator):
         else:
             risk_level = RiskLevel.CRITICAL
 
+        # Determine intervention based on risk level
+        if risk_level == RiskLevel.LOW or risk_level == RiskLevel.MINIMAL:
+            recommended_intervention = InterventionType.MONITORING
+        elif risk_level == RiskLevel.MODERATE:
+            recommended_intervention = InterventionType.MONITORING
+        elif risk_level == RiskLevel.HIGH:
+            recommended_intervention = InterventionType.ISOLATION
+        else:  # CRITICAL
+            recommended_intervention = InterventionType.ISOLATION
+
         assessment = RiskAssessment(
             agent_id=agent_id,
             risk_level=risk_level,
             risk_score=risk_score,
             contributing_factors={"performance": avg_performance if recent_performance else 0.0},
-            recommended_intervention=InterventionType.MONITORING if risk_level == RiskLevel.MODERATE else InterventionType.ISOLATION,
+            recommended_intervention=recommended_intervention,
             timestamp=0.0,
             confidence=0.8
         )
 
         self.assessments[agent_id] = assessment
-        self.monitored_agents[agent_id] = True
+        self.agent_status[agent_id] = True  # True = active, False = isolated
         return assessment
 
     def assess_system_risk(self):
@@ -91,8 +103,9 @@ class MockHavenCoordinator(HavenRiskCoordinator):
 
     def detect_policy_contagion(self, time_window=None):
         high_risk_agents = {aid for aid, a in self.assessments.items() if a.risk_score > 0.7}
+        total_agents = len(self.monitored_agents) if self.monitored_agents else len(self.agent_status)
 
-        if len(high_risk_agents) > len(self.monitored_agents) * 0.3:
+        if len(high_risk_agents) > total_agents * 0.3:
             status = ContagionStatus.SPREADING
         elif len(high_risk_agents) > 0:
             status = ContagionStatus.EARLY_WARNING
@@ -103,7 +116,7 @@ class MockHavenCoordinator(HavenRiskCoordinator):
             contagion_status=status,
             affected_agents=high_risk_agents,
             source_agents=set(list(high_risk_agents)[:2]) if high_risk_agents else set(),
-            contagion_score=len(high_risk_agents) / max(len(self.monitored_agents), 1),
+            contagion_score=len(high_risk_agents) / max(total_agents, 1),
             spread_rate=0.0,
             containment_actions=[],
             timestamp=0.0
@@ -120,12 +133,12 @@ class MockHavenCoordinator(HavenRiskCoordinator):
 
     def isolate_agent(self, agent_id, reason=None):
         """Isolate an agent from the system."""
-        self.monitored_agents[agent_id] = False
+        self.agent_status[agent_id] = False  # Mark as isolated
         return True
 
     def restore_agent(self, agent_id, verification_required=False):
         """Restore an isolated agent."""
-        self.monitored_agents[agent_id] = True
+        self.agent_status[agent_id] = True  # Mark as active
         return True
 
     def compute_adversarial_value(self, state, policy_state, perturbation_budget=0.1):
@@ -159,7 +172,7 @@ class MockHavenCoordinator(HavenRiskCoordinator):
     def get_system_health_report(self):
         """Generate comprehensive system health report."""
         return {
-            "total_agents": len(self.monitored_agents),
+            "total_agents": len(self.monitored_agents) if self.monitored_agents else len(self.agent_status),
             "high_risk_agents": sum(1 for a in self.assessments.values() if a.risk_score > 0.7),
             "average_risk": self.assess_system_risk(),
             "system_status": "healthy"
@@ -258,9 +271,8 @@ class TestSystemInitialization:
                 model=mock_mesa_model,
                 unique_id=f"specialist_{i}",
                 redis_client=mock_redis_client,
-                team_id="team_alpha",
-                role="collaborator"
-            )
+                data_channel="test_channel",
+                team_id="team_alpha")
             specialists.append(specialist)
 
         # Create builder agent
@@ -268,6 +280,8 @@ class TestSystemInitialization:
             model=mock_mesa_model,
             unique_id="builder_1",
             redis_client=mock_redis_client,
+            vector_db=Mock(),
+            sql_logger=Mock(),
             team_id="team_alpha"
         )
 
@@ -297,9 +311,8 @@ class TestSystemInitialization:
             model=mock_mesa_model,
             unique_id="specialist_full",
             redis_client=mock_redis_client,
-            team_id="team_beta",
-            role="learner"
-        )
+                data_channel="test_channel",
+                team_id="team_beta")
 
         # Attach FRL engine
         agent.frl_engine = SimpleFRL(
@@ -341,9 +354,8 @@ class TestCompleteLearningEpisode:
             model=mock_mesa_model,
             unique_id="learner_1",
             redis_client=mock_redis_client,
-            team_id="team_gamma",
-            role="explorer"
-        )
+                data_channel="test_channel",
+                team_id="team_gamma")
 
         agent.frl_engine = SimpleFRL(
             agent_id="learner_1",
@@ -371,22 +383,19 @@ class TestCompleteLearningEpisode:
         next_state = np.random.rand(5)
 
         # 4. Store experience in memory
-        experience = Experience(
+        episodic_memory.store(
             state=state,
             action=action,
             reward=reward,
             next_state=next_state,
             done=False,
-            priority=reward,  # Use reward as initial priority
-            agent_id="learner_1",
-            timestamp=time.time()
+            info={"agent_id": "learner_1"}
         )
-        episodic_memory.store(experience)
 
         # 5. Sample and learn from memory
         if len(episodic_memory) > 0:
-            batch = episodic_memory.sample(batch_size=1)
-            assert len(batch) == 1
+            experiences, indices, weights = episodic_memory.sample(batch_size=1)
+            assert len(experiences) == 1
 
         # 6. Share policy via FRL
         policy = {"weights": np.random.rand(5)}
@@ -429,9 +438,8 @@ class TestCompleteLearningEpisode:
                 model=mock_mesa_model,
                 unique_id=f"team_member_{i}",
                 redis_client=mock_redis_client,
-                team_id="collaborative_team",
-                role="collaborator"
-            )
+                data_channel="test_channel",
+                team_id="collaborative_team")
 
             agent.frl_engine = SimpleFRL(
                 agent_id=f"team_member_{i}",
@@ -501,8 +509,7 @@ class TestSystemFailureAndRecovery:
             model=mock_mesa_model,
             unique_id="risk_mgr",
             redis_client=mock_redis_client,
-            haven_coordinator=haven_coordinator,
-            auto_intervention=True
+            haven_coordinator=haven_coordinator
         )
 
         # Create failing agent
@@ -587,9 +594,8 @@ class TestDataFlowAcrossLayers:
             model=mock_mesa_model,
             unique_id="signal_receiver",
             redis_client=mock_redis_client,
-            team_id="team_delta",
-            role="responder"
-        )
+                data_channel="test_channel",
+                team_id="team_delta")
 
         # Create handler for signal
         received_signals = []
@@ -601,19 +607,21 @@ class TestDataFlowAcrossLayers:
         signal_bus.subscribe(
             agent_id="signal_receiver",
             signal_type=SignalType.OPPORTUNITY,
-            handler=signal_handler
+            callback=signal_handler
         )
 
         # Emit signal
-        signal_bus.emit(
+        signal_bus.emit_signal(
             signal_type=SignalType.OPPORTUNITY,
-            sender_id="signal_sender",
-            priority=SignalPriority.HIGH,
-            data={"resource_location": (10, 20)}
+            source_agent_id="signal_sender",
+            payload={"resource_location": (10, 20)},
+            priority=SignalPriority.HIGH
         )
 
-        # Process signals
-        signal_bus.process_pending_signals(max_signals=10)
+        # Signals are processed automatically in emit_signal
+        # Wait a moment for async processing if enabled
+        import time
+        time.sleep(0.01)
 
         # Verify signal received
         assert len(received_signals) > 0
@@ -629,32 +637,28 @@ class TestDataFlowAcrossLayers:
             model=mock_mesa_model,
             unique_id="memory_learner",
             redis_client=mock_redis_client,
-            team_id="team_epsilon",
-            role="learner"
-        )
+                data_channel="test_channel",
+                team_id="team_epsilon")
 
         agent.episodic_memory = episodic_memory
 
         # Store 10 experiences
         for i in range(10):
-            exp = Experience(
+            episodic_memory.store(
                 state=np.random.rand(5),
                 action=np.random.randint(0, 3),
                 reward=np.random.rand(),
                 next_state=np.random.rand(5),
                 done=False,
-                priority=np.random.rand(),
-                agent_id="memory_learner",
-                timestamp=time.time()
+                info={"agent_id": "memory_learner"}
             )
-            episodic_memory.store(exp)
 
         # Sample batch for learning
-        batch = episodic_memory.sample(batch_size=5)
+        experiences, indices, weights = episodic_memory.sample(batch_size=5)
 
         # Verify batch retrieved
-        assert len(batch) == 5
-        assert all(isinstance(exp, Experience) for exp in batch)
+        assert len(experiences) == 5
+        assert all(isinstance(exp, Experience) for exp in experiences)
 
 
 class TestPerformanceUnderLoad:
@@ -679,9 +683,8 @@ class TestPerformanceUnderLoad:
                 model=mock_mesa_model,
                 unique_id=f"agent_{i}",
                 redis_client=mock_redis_client,
-                team_id="large_team",
-                role="worker"
-            )
+                data_channel="test_channel",
+                team_id="large_team")
             agents.append(agent)
 
         creation_time = time.time() - start_time
@@ -760,9 +763,8 @@ class TestCompleteSystemLifecycle:
                 model=mock_mesa_model,
                 unique_id=f"specialist_{i}",
                 redis_client=mock_redis_client,
-                team_id="main_team",
-                role="worker"
-            )
+                data_channel="test_channel",
+                team_id="main_team")
             for i in range(3)
         ]
 
